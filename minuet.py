@@ -1,5 +1,20 @@
 # ── Virtual-Threaded Memory Tracing Minuet Kernel Map ──
 # Simulate a fixed pool of virtual threads of size NUM_THREADS
+# Basic usage - read and analyze a trace file
+# How to run
+# python trace_reader.py memory_trace.bin.gz
+
+# # Filter trace by phase
+# python trace_reader.py memory_trace.bin.gz --filter-phase "Lookup"
+
+# # Filter trace by operation
+# python trace_reader.py memory_trace.bin.gz --filter-op "W"
+
+# # Generate memory access pattern plots
+# python trace_reader.py memory_trace.bin.gz --plot
+
+# # Save plot to file
+# python trace_reader.py memory_trace.bin.gz --plot --plot-file memory_access.png
 import threading
 
 # ── Global Memory Trace Setup ──
@@ -9,30 +24,19 @@ debug = False
 
 # Number of virtual threads (parameterizable)
 NUM_THREADS = 4  # example: 3 parallel virtual threads
+phases = {
+'Radix-Sort': 0,
+'Build-Queries': 1,
+'Sort-QKeys': 2,
+'Tile-Pivots': 3,
+'Lookup': 4,
+"Lookup-Backward": 5,
+"Lookup-Forward": 6,
+}
+tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'WV': 7}
+ops = {'R': 0, 'W': 1}
 
-def record_access(thread_id, op, addr):
-    """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
-    # Determine tensor by address
-    if U_BASE <= addr < QK_BASE:
-        tensor = 'I'
-    elif QK_BASE <= addr < QI_BASE:
-        tensor = 'QK'
-    elif QI_BASE <= addr < QO_BASE:
-        tensor = 'QI'
-    elif QO_BASE <= addr < PIV_BASE:
-        tensor = 'QO'
-    elif PIV_BASE <= addr < KM_BASE:
-        tensor = 'PIV'
-    elif KM_BASE <= addr < WO_BASE:
-        tensor = 'KM'
-    elif WO_BASE <= addr < WV_BASE:
-        tensor = 'WO'
-    else:
-        tensor = 'WV'
-    entry = (current_phase, thread_id, op, tensor, hex(addr))
-    mem_trace.append(entry)
-    # print(f"[{current_phase}] Thread{thread_id} {op} {tensor}@{hex(addr)}")
-
+## Tensor Regions
 # ── Base addresses and sizes ──
 # TENSOR REGIONS:
 # U : Unique-sorted input keys
@@ -57,6 +61,77 @@ WV_BASE   = 0x90000000
 SIZE_KEY    = 4   # 32-bit keys
 SIZE_INT    = 4
 SIZE_WEIGHT = 4
+
+
+def write_mem_trace(filename):
+    """Write memory trace to a file in compressed integer format."""
+    # Create mappings for strings to integers
+    phases = {}
+    
+    # Create compressed trace
+    compressed_trace = []
+    for entry in mem_trace:
+        phase, thread_id, op, tensor, addr = entry
+        
+        # Map phase to integer (assign new ID if not seen before)
+        if phase not in phases:
+            phases[phase] = len(phases)
+        phase_id = phases[phase]
+        
+        # Convert address from hex string to integer
+        addr_int = int(addr, 16)
+        
+        # Create compressed entry (all integers)
+        compressed_entry = (phase_id, thread_id, ops[op], tensors[tensor], addr_int)
+        compressed_trace.append(compressed_entry)
+    
+    # Write to binary file for maximum compression
+    import struct
+    import gzip
+    
+    with gzip.open(filename, 'wb') as f:
+        # Write header with mapping information
+        # f.write(struct.pack('I', len(phases)))
+        f.write(struct.pack('I', len(compressed_trace)))
+        
+        # Write each entry as packed integers
+        # Phase id, thread id, ops, tensor_id  map to bytes
+        # Format should be BBBBI 
+        for entry in compressed_trace:
+            print(entry)
+            f.write(struct.pack('BBBBI', *entry))
+    
+    print(f"Memory trace written to {filename}")
+    print(f"Compressed {len(mem_trace)} entries")
+    print(f"Phase mapping: {phases}")
+
+
+
+
+def record_access(thread_id, op, addr):
+    """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
+    # Determine tensor by address
+    if U_BASE <= addr < QK_BASE:
+        tensor = 'I'
+    elif QK_BASE <= addr < QI_BASE:
+        tensor = 'QK'
+    elif QI_BASE <= addr < QO_BASE:
+        tensor = 'QI'
+    elif QO_BASE <= addr < PIV_BASE:
+        tensor = 'QO'
+    elif PIV_BASE <= addr < KM_BASE:
+        tensor = 'PIV'
+    elif KM_BASE <= addr < WO_BASE:
+        tensor = 'KM'
+    elif WO_BASE <= addr < WV_BASE:
+        tensor = 'WO'
+    else:
+        tensor = 'WV'
+    entry = (current_phase, thread_id, op, tensor, hex(addr))
+    mem_trace.append(entry)
+    # print(f"[{current_phase}] Thread{thread_id} {op} {tensor}@{hex(addr)}")
+
+
 
 # ── Helper: pack/unpack 32-bit keys ──
 def pack32(*coords):
@@ -95,18 +170,16 @@ def radix_sort_with_memtrace(arr, base):
     aux = [0] * N
     for p in range(passes):
         # Phase: count
-        global current_phase
-        current_phase = f"Radix-P{p:02d}-Count"
         for i in range(N):
             # cycle thread IDs among NUM_THREADS
             t_id = (i % NUM_THREADS) + 1
-        #     record_access(t_id, 'R', base + i*SIZE_KEY)
-        #     _ = (arr[i] >> (p*8)) & mask
+            record_access(t_id, 'R', base + i*SIZE_KEY)
+            _ = (arr[i] >> (p*8)) & mask
         # # Phase: prefix (no memory ops)
         # Assume counters are in register.
-        current_phase = f"Radix-P{p:02d}-Prefix"
+        # current_phase = f"Radix-P{p:02d}-Prefix"
         # Phase: scatter
-        current_phase = f"Radix-P{p:02d}-Scatter"
+        # current_phase = f"Radix-P{p:02d}-Scatter"
         for i in range(N):
             t_id = (i % NUM_THREADS) + 1
             record_access(t_id, 'R', base + i*SIZE_KEY)
@@ -144,9 +217,9 @@ def compute_unique_sorted(coords, stride):
             last = k
 
     # Print results
-    print("Sorted+Unique Keys:")
    
     if debug:    
+        print("Sorted+Unique Keys:")
         for idx, k in enumerate(unique):
             print(f"key={hex(k)}, coords={unpack32(k)}")
     return unique
@@ -201,13 +274,13 @@ def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
     kernel_map = {k: [] for k in range(len(set(qki)))}
     Nq = len(qkeys)
     for q in range(Nq):
-        thread_id = threading.get_ident()
+        thread_id = 0
         record_access(thread_id, 'R', QK_BASE + q*SIZE_KEY)
         target = qkeys[q]
         # print(unpack32)
         # backward search on pivots
         lo, hi = 0, len(pivots)-1
-        compute_phase = "Lookup-Backward"
+        current_phase = "Lookup-Backward"
         while lo<=hi:
             mid=(lo+hi)//2
             record_access(thread_id,'R',PIV_BASE+mid*SIZE_KEY)
@@ -216,7 +289,7 @@ def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
         if hi<0: hi = 0
         tile_idx=hi; base_off=tile_idx*tile_size
         # forward scan
-        compute_phase = "Lookup-Forward"
+        current_phase = "Lookup-Forward"
         for j,val in enumerate(tiles[tile_idx]):
             record_access(thread_id,'R',TILE_BASE+(base_off+j)*SIZE_KEY)
             if val==target:
@@ -276,3 +349,8 @@ if __name__ == '__main__':
     
     print('\nMemory Trace Entries:')
     for e in mem_trace: print(e)
+    write_mem_trace('memory_trace.bin.gz')
+
+
+
+
