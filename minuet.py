@@ -172,7 +172,7 @@ def radix_sort_with_memtrace(arr, base):
         # Phase: count
         for i in range(N):
             # cycle thread IDs among NUM_THREADS
-            t_id = (i % NUM_THREADS) + 1
+            t_id = (i % NUM_THREADS) 
             record_access(t_id, 'R', base + i*SIZE_KEY)
             _ = (arr[i] >> (p*8)) & mask
         # # Phase: prefix (no memory ops)
@@ -181,7 +181,7 @@ def radix_sort_with_memtrace(arr, base):
         # Phase: scatter
         # current_phase = f"Radix-P{p:02d}-Scatter"
         for i in range(N):
-            t_id = (i % NUM_THREADS) + 1
+            t_id = (i % NUM_THREADS) 
             record_access(t_id, 'R', base + i*SIZE_KEY)
             pos = i  # for illustration, stable mapping
             aux[pos] = arr[i]
@@ -273,35 +273,58 @@ def make_tiles_and_pivots(uniq_in, tile_size):
 def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
     kernel_map = {k: [] for k in range(len(set(qki)))}
     Nq = len(qkeys)
-    for q in range(Nq):
-        thread_id = 0
-        record_access(thread_id, 'R', QK_BASE + q*SIZE_KEY)
-        target = qkeys[q]
-        # print(unpack32)
-        # backward search on pivots
-        lo, hi = 0, len(pivots)-1
-        current_phase = "Lookup-Backward"
-        while lo<=hi:
-            mid=(lo+hi)//2
-            record_access(thread_id,'R',PIV_BASE+mid*SIZE_KEY)
-            if pivots[mid]<=target: lo=mid+1
-            else: hi=mid-1
-        if hi<0: hi = 0
-        tile_idx=hi; base_off=tile_idx*tile_size
-        # forward scan
-        current_phase = "Lookup-Forward"
-        for j,val in enumerate(tiles[tile_idx]):
-            record_access(thread_id,'R',TILE_BASE+(base_off+j)*SIZE_KEY)
-            if val==target:
-                i_idx, k_idx = qii[q], qki[q]
-                kernel_map[k_idx].append((unpack32(uniq[i_idx]), unpack32(val), unpack32s(woffs[q])))
-                # Record kernel map access
-                record_access(thread_id,'W',KM_BASE+q*2*SIZE_KEY)
-                addr_i=KM_BASE+q*2*SIZE_INT
-                addr_j=addr_i+SIZE_INT
-                # record_access(thread_id,'W',addr_i)
-                # record_access(thread_id,'W',addr_j)
-                break
+
+    # Thread synchronization
+    kernel_map_lock = threading.Lock()
+
+    # Worker function for parallel execution
+    def process_query(q_start, q_end, thread_id):
+        for q in range(q_start, q_end):
+            record_access(thread_id, 'R', QK_BASE + q*SIZE_KEY)
+            target = qkeys[q]
+            
+            # backward search on pivots
+            lo, hi = 0, len(pivots)-1
+            while lo<=hi:
+                mid=(lo+hi)//2
+                record_access(thread_id, 'R', PIV_BASE+mid*SIZE_KEY)
+                if pivots[mid]<=target: lo=mid+1
+                else: hi=mid-1
+            if hi<0: hi = 0
+            tile_idx=hi; base_off=tile_idx*tile_size
+            
+            # forward scan
+            for j,val in enumerate(tiles[tile_idx]):
+                record_access(thread_id, 'R', TILE_BASE+(base_off+j)*SIZE_KEY)
+                if val==target:
+                    i_idx, k_idx = qii[q], qki[q]
+                    with kernel_map_lock:
+                        kernel_map[k_idx].append((unpack32(val), unpack32(uniq[i_idx]), unpack32s(woffs[q])))
+                    addr_i=KM_BASE+q*2*SIZE_INT
+                    addr_j=addr_i+SIZE_INT
+                    # record_access(thread_id, 'W', addr_i)
+                    # record_access(thread_id, 'W', addr_j)
+                    break
+    
+    # Create threads to process data in parallel
+    threads = []
+    chunk_size = (Nq + NUM_THREADS - 1) // NUM_THREADS  # Ceiling division
+    
+    for t in range(NUM_THREADS):
+        q_start = t * chunk_size
+        q_end = min(q_start + chunk_size, Nq)
+        if q_start < Nq:  # Only create thread if there's work to do
+            thread = threading.Thread(
+                target=process_query,
+                args=(q_start, q_end, t)  # thread_id starts from 1
+            )
+            threads.append(thread)
+            thread.start()
+    
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+        
     return kernel_map
 
 # ── Example Test with Phases ──
