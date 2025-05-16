@@ -16,8 +16,8 @@
 # # Save plot to file
 # python trace_reader.py memory_trace.bin.gz --plot --plot-file memory_access.png
 import threading
-from pathlib import Path
-from read_pcl import read_point_cloud
+#from pathlib import Path
+#from read_pcl import read_point_cloud
 
 # ── Global Memory Trace Setup ──
 gmem_trace = []
