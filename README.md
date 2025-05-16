@@ -55,7 +55,7 @@ Example: offsets = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (
 |---------------------------|------------------------------------------------------------------------------------------------------------------------|-----------------------|
 | `debug`                   | (boolean) If True, enables additional print statements for debugging.                                                  | `True`                |
 | `NUM_THREADS`             | (integer) The number of virtual threads to simulate for parallel processing.                                           | `4`                   |
-| `I_TILES`                 | (integer) The number of input elements per tile, used in the `make_tiles_and_pivots` function and affects the lookup phase. | `2`                   |
+| `I_TILES`                 | (integer) The number of input elements per tile, used in the `make_tiles_and_pivots` used during the backward binary search phase | `2`                   |
 | **Tensor Base Addresses** | These hexadecimal values define the starting memory addresses for different data structures (tensors) used in the simulation. |                       |
 | `I_BASE`                  | Base address for input point coordinates.                                                                              | `0x10000000`          |
 | `QK_BASE`                 | Base address for query keys.                                                                                           | `0x20000000`          |
@@ -65,7 +65,7 @@ Example: offsets = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (
 | `TILE_BASE`               | Alias for `I_BASE`, used for tile data reads.                                                                          | `0x10000000`          |
 | `KM_BASE`                 | Base address for kernel map writes.                                                                                    | `0x60000000`          |
 | `WO_BASE`                 | Base address for reading weight offsets.                                                                               | `0x80000000`          |
-| `IV_BASE`                 | Base address for input feature vectors.                                                                                | `0x100000000`         |
+| `IV_BASE`                 | Base address for input feature vectors. **Currently unused.**                                                             | `0x100000000`         |
 | `WV_BASE`                 | Base address for weight values.                                                                                        | `0x800000000`         |
 | **Data Type Sizes**       |                                                                                                                        |                       |
 | `SIZE_KEY`                | (integer) Size of a key in bytes (e.g., for coordinates).                                                              | `4` (32-bit)          |
