@@ -16,11 +16,13 @@
 # # Save plot to file
 # python trace_reader.py memory_trace.bin.gz --plot --plot-file memory_access.png
 import threading
+from pathlib import Path
+from read_pcl import read_point_cloud
 
 # ── Global Memory Trace Setup ──
 gmem_trace = []
 current_phase = None
-debug = False
+debug = True
 
 # Number of virtual threads (parameterizable)
 NUM_THREADS = 4  # example: 3 parallel virtual threads
@@ -154,29 +156,30 @@ def record_access(thread_id, op, addr):
 def pack32(*coords):
     key = 0
     for c in coords:
-        key = (key << 8) | (c & 0xFF)
+        key = (key << 12) | (c & 0xFFF)
     return key
 
 def unpack32(key):
-    z = key & 0xFF; key >>= 8
-    y = key & 0xFF; key >>= 8
-    x = key & 0xFF; key >>= 8
+    z = key & 0xFFF; key >>= 12
+    y = key & 0xFFF; key >>= 12
+    x = key & 0xFFF; key >>= 12 
     return (x, y, z)
 # Unpack signed 8 bit integers
 # Unpack signed 8 bit integers
+
 def unpack32s(key):
     # Treat as 8 bit signed integers
-    z = key & 0xFF
-    z = z if z < 128 else z - 256
-    key >>= 8
-    
-    y = key & 0xFF
-    y = y if y < 128 else y - 256
-    key >>= 8
-    
-    x = key & 0xFF
-    x = x if x < 128 else x - 256
-    
+    z = key & 0xFFF
+    z = z if z < 2048 else z - 4096
+    key >>= 12
+
+    y = key & 0xFFF
+    y = y if y < 2048 else y - 4096
+    key >>= 12
+
+    x = key & 0xFFF
+    x = x if x < 2048 else x - 4096
+
     return (x, y, z)
 
 # ── Radix Sort with Fixed Virtual Threads ──
@@ -258,10 +261,10 @@ def build_queries(uniq_in, stride, offsets):
             idx = k_idx*M + i_idx
                         # Unpack both keys
             x_in, y_in, z_in = unpack32(in_key)
-            # Add and gate to ensure no negative values
-            x_new = 0 if x_in + odx <= 0 else x_in + odx
-            y_new = 0 if y_in + ody <= 0 else y_in + ody
-            z_new = 0 if z_in + odz <= 0 else z_in + odz
+            
+            x_new = x_in + odx
+            y_new = y_in + ody
+            z_new = z_in + odz
 
             # Repack with non-negative values
             qkeys[idx] = pack32(x_new, y_new, z_new)
@@ -369,10 +372,11 @@ def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
 
 # ── Example Test with Phases ──
 if __name__ == '__main__':
+    
     coords = [(1,5,0),(0,1,1),(0,0,2),(0,0,3)]
     stride = 1
     offsets = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
-    # offsets = [(-1,-1,1)]
+    # offsets = [(0,1,-1)]
 
     # Phase 1
     current_phase = 'Radix-Sort'
@@ -404,8 +408,8 @@ if __name__ == '__main__':
     km = lookup_phase(uniq,qkeys,qii,qki,woffs,tiles,pivots,I_TILES)
     current_phase = None
     if debug:
-        print('\nSorted Source Array:', [unpack32(k) for k in uniq])
-        print('Segmented Query Arrays:', [[unpack32(k) for k in qkeys_pre[k*len(uniq):(k+1)*len(uniq)] ] for k in range(len(offsets))])
+        print('\nSorted Source Array:', [unpack32s(k) for k in uniq])
+        print('Segmented Query Arrays:', [[unpack32s(k) for k in qkeys_pre[k*len(uniq):(k+1)*len(uniq)] ] for k in range(len(offsets))])
     if debug:
         print('Kernel Map:', km)
     
