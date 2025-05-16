@@ -1,20 +1,6 @@
 # ── Virtual-Threaded Memory Tracing Minuet Kernel Map ──
 # Simulate a fixed pool of virtual threads of size NUM_THREADS
 # Basic usage - read and analyze a trace file
-# How to run
-# python trace_reader.py memory_trace.bin.gz
-
-# # Filter trace by phase
-# python trace_reader.py memory_trace.bin.gz --filter-phase "Lookup"
-
-# # Filter trace by operation
-# python trace_reader.py memory_trace.bin.gz --filter-op "W"
-
-# # Generate memory access pattern plots
-# python trace_reader.py memory_trace.bin.gz --plot
-
-# # Save plot to file
-# python trace_reader.py memory_trace.bin.gz --plot --plot-file memory_access.png
 import threading
 #from pathlib import Path
 #from read_pcl import read_point_cloud
