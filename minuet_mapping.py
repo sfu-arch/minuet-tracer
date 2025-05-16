@@ -39,11 +39,11 @@ SIZE_WEIGHT = 4
 
 ## Tensor Regions
 I_BASE    = 0x10000000 # Base address for input point coordinates. Input feature vectors get separate region
+TILE_BASE = I_BASE # TILE: Tile data reads (alias U)
 QK_BASE   = 0x20000000 # Query keys. We construct an explicit query keys by combining offset with input keys. In real minuet this would be done on-the-fly. There should be no acceses recorded to this region
 QI_BASE   = 0x30000000 # QI: Query input-index array
 QO_BASE   = 0x40000000 # QO: Query offset-index array
 PIV_BASE  = 0x50000000 # PIV: Tile pivot keys
-TILE_BASE = I_BASE # TILE: Tile data reads (alias U)
 KM_BASE   = 0x60000000 # KM: Kernel-map writes
 WO_BASE   = 0x80000000 # WO: Weight-offset keys
 
@@ -64,10 +64,8 @@ def address_to_tensor(addr):
         return 'QI'
     elif addr >= QO_BASE and addr < PIV_BASE:
         return 'QO'
-    elif addr >= PIV_BASE and addr < TILE_BASE:
+    elif addr >= PIV_BASE and addr < KM_BASE:
         return 'PIV'
-    elif addr >= TILE_BASE and addr < KM_BASE:
-        return 'TILE'
     elif addr >= KM_BASE and addr < WO_BASE:
         return 'KM'
     elif addr >= WO_BASE and addr < WV_BASE:
@@ -354,7 +352,7 @@ if __name__ == '__main__':
     coords = [(1,5,0),(0,1,1),(0,0,2),(0,0,3)]
     stride = 1
     offsets = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
-    # offsets = [(0,1,-1)]
+    # offsets = [(0,1,-1),(0,1,0)]
 
     # Phase 1
     current_phase = 'Radix-Sort'

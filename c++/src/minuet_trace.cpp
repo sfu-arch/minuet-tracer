@@ -57,9 +57,8 @@ std::string address_to_tensor(uint64_t addr) {
         return "QI";
     } else if (addr >= QO_BASE && addr < PIV_BASE) { // Range for Query Offset-index tensor
         return "QO";
-    } else if (addr >= TILE_BASE && addr < KM_BASE) { // TILE_BASE is an alias for I_BASE. This range is [0x1..., 0x6...-1]
-                                                  // It catches addresses in I_BASE region if not 'I', and also QK,QI,QO regions if not caught earlier.
-        return "TILE";
+    } else if (addr >= PIV_BASE && addr < KM_BASE) { // Range for Tile tensor
+        return "PIV";
     } else if (addr >= KM_BASE && addr < WO_BASE) {   // Range for Kernel Map tensor
         return "KM";
     } else if (addr >= WO_BASE && addr < IV_BASE) {   // Range for Weight Offsets tensor (Python used WV_BASE as upper bound)
