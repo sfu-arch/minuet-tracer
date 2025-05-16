@@ -21,20 +21,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake zlib1g-dev
 
+      - name: Cache C++ build artifacts
+        id: cache-cpp-build
+        uses: actions/cache@v4
+        with:
+          path: c++/build # Directory to cache
+          # Key for the cache. Changes if C++ source/CMake files change.
+          key: ${{ runner.os }}-cpp-build-${{ hashFiles('c++/CMakeLists.txt', 'c++/src/**', 'c++/include/**') }}
+          restore-keys: |
+            ${{ runner.os }}-cpp-build-
+
       - name: Build C++ project
         run: |
           cd c++
-          mkdir build
+          # cmake -B <build_dir> creates the directory if it doesn't exist
+          # and configures the project.
+          cmake -B build 
           cd build
-          cmake ..
           make
 
-      - name: Set up Python environment
+      - name: Cache Python dependencies
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip # Standard pip cache directory
+          # Key for the cache. If you add a requirements.txt, this will use its hash.
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Set up Python environment and install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install open3d
+          pip install open3d # Will use cached packages if available
 
       - name: Run Python scripts
         run: |
           python3 minuet_mapping.py
+          # Ensure the trace file from the C++ version is used if that's intended
+          # For now, assuming memory_trace.bin.gz is from the python script run
           python3 trace_reader.py memory_trace.bin.gz --filter-phase "Lookup"
