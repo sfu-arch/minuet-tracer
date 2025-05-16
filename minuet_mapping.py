@@ -24,31 +24,29 @@ phases = {
 tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'TILE': 7}
 ops = {'R': 0, 'W': 1}
 
-
-
 # Number of input tiles and pivots for speeding up backward search
 I_TILES = 2
 
+
+
+
+SIZE_KEY    = 4   # 32-bit keys
+SIZE_INT    = 4
+SIZE_WEIGHT = 4
+
+
+
+
 ## Tensor Regions
-# ── Base addresses and sizes ──
-# TENSOR REGIONS:
-# U : Unique-sorted input keys
-# QK: Query keys
-# QI: Query input-index array
-# QO: Query offset-index array
-# PIV: Tile pivot keys
-# TILE: Tile data reads (alias U)
-# KM: Kernel-map writes
-# WO: Weight-offset keys
-# WV: Weight values
 I_BASE    = 0x10000000 # Base address for input point coordinates. Input feature vectors get separate region
 QK_BASE   = 0x20000000 # Query keys. We construct an explicit query keys by combining offset with input keys. In real minuet this would be done on-the-fly. There should be no acceses recorded to this region
-QI_BASE   = 0x30000000 # Query input-index array. Helper metadata.
-QO_BASE   = 0x40000000 # Query offset-index array. Helper metadata. 
-PIV_BASE  = 0x50000000 # Tile pivot keys
-TILE_BASE = I_BASE
-KM_BASE   = 0x60000000 # Kernel map writes. This is where the kernel map is written to.
-WO_BASE   = 0x80000000 # Reading the weight offsets from memory
+QI_BASE   = 0x30000000 # QI: Query input-index array
+QO_BASE   = 0x40000000 # QO: Query offset-index array
+PIV_BASE  = 0x50000000 # PIV: Tile pivot keys
+TILE_BASE = I_BASE # TILE: Tile data reads (alias U)
+KM_BASE   = 0x60000000 # KM: Kernel-map writes
+WO_BASE   = 0x80000000 # WO: Weight-offset keys
+
 
 # The feature vectors. Moving into 64 bit space now to avoid collisions between 
 # small metadata tensors and larger feature vectors.
@@ -76,12 +74,6 @@ def address_to_tensor(addr):
         return 'WO'
     else:
         return 'Unknown'
-
-
-
-SIZE_KEY    = 4   # 32-bit keys
-SIZE_INT    = 4
-SIZE_WEIGHT = 4
 
 
 def write_gmem_trace(filename):

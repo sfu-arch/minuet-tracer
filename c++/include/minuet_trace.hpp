@@ -66,37 +66,37 @@ const int SIZE_WEIGHT = 4;
 std::string address_to_tensor(uint64_t addr);
 void write_gmem_trace(const std::string& filename);
 void record_access(int thread_id, const std::string& op, uint64_t addr);
-uint32_t pack32(int c1, int c2, int c3);
-std::tuple<int, int, int> unpack32(uint32_t key);
-std::tuple<int, int, int> unpack32s(uint32_t key);
-std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint64_t base);
-std::vector<uint32_t> compute_unique_sorted(const std::vector<std::tuple<int, int, int>>& coords, int stride);
+uint64_t pack32(int c1, int c2, int c3);
+std::tuple<int, int, int> unpack32(uint64_t key);
+std::tuple<int, int, int> unpack32s(uint64_t key);
+std::vector<uint64_t> radix_sort_with_memtrace(std::vector<uint64_t>& arr, uint64_t base);
+std::vector<uint64_t> compute_unique_sorted(const std::vector<std::tuple<int, int, int>>& coords, int stride);
 
 struct QueryData {
-    std::vector<uint32_t> qkeys;
+    std::vector<uint64_t> qkeys;
     std::vector<uint32_t> qii;
     std::vector<uint32_t> qki;
-    std::vector<uint32_t> woffs;
+    std::vector<uint64_t> woffs;
 };
-QueryData build_queries(const std::vector<uint32_t>& uniq_in, int stride, const std::vector<std::tuple<int, int, int>>& offsets);
+QueryData build_queries(const std::vector<uint64_t>& uniq_in, int stride, const std::vector<std::tuple<int, int, int>>& offsets);
 
 struct TilesPivots {
-    std::vector<std::vector<uint32_t>> tiles;
-    std::vector<uint32_t> pivots;
+    std::vector<std::vector<uint64_t>> tiles;
+    std::vector<uint64_t> pivots;
 };
-TilesPivots make_tiles_and_pivots(const std::vector<uint32_t>& uniq_in, int tile_size);
+TilesPivots make_tiles_and_pivots(const std::vector<uint64_t>& uniq_in, int tile_size);
 
 using KernelMapEntry = std::tuple<std::tuple<int, int, int>, std::tuple<int, int, int>, std::tuple<int, int, int>>;
 using KernelMap = std::map<int, std::vector<KernelMapEntry>>;
 
 KernelMap lookup_phase(
-    const std::vector<uint32_t>& uniq,
-    const std::vector<uint32_t>& qkeys,
+    const std::vector<uint64_t>& uniq,
+    const std::vector<uint64_t>& qkeys,
     const std::vector<uint32_t>& qii,
     const std::vector<uint32_t>& qki,
-    const std::vector<uint32_t>& woffs,
-    const std::vector<std::vector<uint32_t>>& tiles,
-    const std::vector<uint32_t>& pivots,
+    const std::vector<uint64_t>& woffs,
+    const std::vector<std::vector<uint64_t>>& tiles,
+    const std::vector<uint64_t>& pivots,
     int tile_size
 );
 

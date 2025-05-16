@@ -25,7 +25,7 @@ int main() {
     // --- Phase 1: Radix Sort (Unique Sorted Input Keys) ---
     current_phase = "Radix-Sort";
     std::cout << "\n--- Phase: " << current_phase << " with " << NUM_THREADS << " threads ---" << std::endl;
-    std::vector<uint32_t> uniq = compute_unique_sorted(coords, stride);
+    std::vector<uint64_t> uniq = compute_unique_sorted(coords, stride);
 
     // --- Phase 2: Build Queries ---
     current_phase = "Build-Queries";
@@ -40,7 +40,7 @@ int main() {
     // The qkeys from build_queries are used directly.
     current_phase = "Sort-QKeys";
     std::cout << "--- Phase: " << current_phase << " ---" << std::endl;
-    std::vector<uint32_t> qkeys_for_lookup = query_data.qkeys; // Use the qkeys as generated
+    std::vector<uint64_t> qkeys_for_lookup = query_data.qkeys; // Use the qkeys as generated
 
     // --- Phase 4: Tile and Pivot Generation ---
     current_phase = "Tile-Pivots";

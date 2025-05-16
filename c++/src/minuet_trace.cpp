@@ -57,25 +57,7 @@ std::string address_to_tensor(uint64_t addr) {
         return "QI";
     } else if (addr >= QO_BASE && addr < PIV_BASE) { // Range for Query Offset-index tensor
         return "QO";
-    }
-    // Original Python: elif addr >= PIV_BASE and addr < TILE_BASE: return 'PIV'
-    // Since TILE_BASE (0x10000000) < PIV_BASE (0x50000000), this condition
-    // PIV_BASE (0x5...) <= addr < TILE_BASE (0x1...) is never true. So, this specific 'PIV' rule is "dead".
-    // The next rule for 'TILE' might catch addresses intended for 'PIV' if PIV_BASE falls within TILE's broader range.
-    // However, the current structure implies distinct regions or specific overrides.
-    // For a robust mapping, PIV_BASE should ideally be less than the next region it's distinct from (e.g. KM_BASE).
-    // The Python code's next check is:
-    // elif addr >= TILE_BASE and addr < KM_BASE: return 'TILE'
-    // Since TILE_BASE is I_BASE (0x1...), this covers [0x1..., 0x6...-1].
-    // This 'TILE' range overlaps with 'I', 'QK', 'QI', 'QO'.
-    // The cascade means 'I', 'QK', 'QI', 'QO' get precedence if their conditions match.
-    // What remains for 'TILE' is [I_BASE, KM_BASE-1] excluding those prior specific ranges.
-    // This means 'TILE' would apply to addresses in [PIV_BASE, KM_BASE-1] if PIV_BASE is in that range and the dead PIV rule is ignored.
-    // Or, more simply, 'TILE' applies to I_BASE region if it's a tile access conceptually.
-    // The Python code's `record_access_local` for TILE_BASE accesses implies `address_to_tensor` should yield 'TILE'.
-    // This implies 'TILE' can override 'I' if context demands, or the ranges are set up for it.
-    // Sticking to the Python cascade:
-    else if (addr >= TILE_BASE && addr < KM_BASE) { // TILE_BASE is an alias for I_BASE. This range is [0x1..., 0x6...-1]
+    } else if (addr >= TILE_BASE && addr < KM_BASE) { // TILE_BASE is an alias for I_BASE. This range is [0x1..., 0x6...-1]
                                                   // It catches addresses in I_BASE region if not 'I', and also QK,QI,QO regions if not caught earlier.
         return "TILE";
     } else if (addr >= KM_BASE && addr < WO_BASE) {   // Range for Kernel Map tensor
@@ -182,8 +164,8 @@ void record_access(int thread_id, const std::string& op, uint64_t addr) {
     // }
 }
 
-uint32_t pack32(int c1, int c2, int c3) {
-    // Packs three integer coordinates into a single 32-bit unsigned integer.
+uint64_t pack32(int c1, int c2, int c3) {
+    // Packs three integer coordinates into a single 64-bit unsigned integer.
     // Python's pack32: key = 0; for c in coords: key = (key << 12) | (c & 0xFFF)
     // For (c1, c2, c3):
     // 1. key = (0 << 12) | (c1 & 0xFFF)  => c1 effectively
@@ -192,15 +174,15 @@ uint32_t pack32(int c1, int c2, int c3) {
     // This means c1 is in the most significant 12 bits (bits 24-35 conceptually),
     // c2 in the middle (bits 12-23), and c3 in the least significant (bits 0-11).
     // This requires a 36-bit number if all 12 bits are used per coord.
-    // Since the return type is uint32_t, the result will be truncated/modulo 2^32.
-    uint32_t key = 0;
-    key = (key << 12) | (static_cast<uint32_t>(c1) & 0xFFF); // c1 is now in bits 0-11
-    key = (key << 12) | (static_cast<uint32_t>(c2) & 0xFFF); // c1 in bits 12-23, c2 in 0-11
-    key = (key << 12) | (static_cast<uint32_t>(c3) & 0xFFF); // c1 in bits 24-31 (upper 8 bits of its 12), c2 in 12-23, c3 in 0-11
+    // Since the return type is uint64_t, the result will not be truncated.
+    uint64_t key = 0;
+    key = (key << 12) | (static_cast<uint64_t>(c1) & 0xFFF); // c1 is now in bits 0-11
+    key = (key << 12) | (static_cast<uint64_t>(c2) & 0xFFF); // c1 in bits 12-23, c2 in 0-11
+    key = (key << 12) | (static_cast<uint64_t>(c3) & 0xFFF); // c1 in bits 24-31 (upper 8 bits of its 12), c2 in 12-23, c3 in 0-11
     return key; // The result is implicitly truncated to 32 bits.
 }
 
-std::tuple<int, int, int> unpack32(uint32_t key) {
+std::tuple<int, int, int> unpack32(uint64_t key) {
     // Unpacks a 32-bit key into three coordinates (x, y, z).
     // This is the reverse of the pack32 logic assuming truncation.
     // c3 was packed last, so it's in the LSBs.
@@ -216,13 +198,13 @@ std::tuple<int, int, int> unpack32(uint32_t key) {
     return std::make_tuple(x_coord, y_coord, z_coord);
 }
 
-std::tuple<int, int, int> unpack32s(uint32_t key) {
+std::tuple<int, int, int> unpack32s(uint64_t key) {
     // Unpacks a 32-bit key into three signed coordinates, performing sign extension from 12 bits.
     // A 12-bit number is negative if its 11th bit (0-indexed) is 1.
     // 0xFFF is 12 bits. Max positive is 2047 (0x7FF). Min negative is -2048 (0x800).
     // If value is >= 2048 (0x800), it's negative in 12-bit 2's complement. Subtract 4096 (0x1000).
-    
-    uint32_t temp_key = key; // Use a temporary variable for modification
+
+    uint64_t temp_key = key; // Use a temporary variable for modification
 
     int z_val = static_cast<int>(temp_key & 0xFFF);
     z_val = (z_val < 2048) ? z_val : z_val - 4096;
@@ -238,14 +220,14 @@ std::tuple<int, int, int> unpack32s(uint32_t key) {
     return std::make_tuple(x_val, y_val, z_val);
 }
 
-std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint64_t base) {
+std::vector<uint64_t> radix_sort_with_memtrace(std::vector<uint64_t>& arr, uint64_t base) {
     // Simulates memory accesses of a radix sort. It does not fully sort the array but mimics
     // the read/write patterns of a simplified radix sort pass.
     const int mask = 0xFF; // Mask for extracting a byte
     const int passes = 4;  // For 32-bit keys (4 bytes)
     size_t N = arr.size();
     if (N == 0) return arr; // Handle empty array
-    std::vector<uint32_t> aux(N); // Auxiliary array for simulated data movement
+    std::vector<uint64_t> aux(N); // Auxiliary array for simulated data movement
 
     for (int p = 0; p < passes; ++p) {
         // Phase: count (simulated reads)
@@ -253,7 +235,7 @@ std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint6
             int t_id = static_cast<int>(i % NUM_THREADS); // Cycle thread IDs
             record_access(t_id, "R", base + i * SIZE_KEY); // Record read access
             // The actual value extraction for sorting logic (not used further in this simulation)
-            [[maybe_unused]] uint32_t byte_val = (arr[i] >> (p * 8)) & mask;
+            [[maybe_unused]] uint64_t byte_val = (arr[i] >> (p * 8)) & mask;
         }
 
         // Phase: scatter (simulated reads and writes)
@@ -269,8 +251,8 @@ std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint6
     return arr; // Return the array after simulated passes
 }
 
-std::vector<uint32_t> compute_unique_sorted(const std::vector<std::tuple<int, int, int>>& coords, int stride) {
-    std::vector<uint32_t> keys;
+std::vector<uint64_t> compute_unique_sorted(const std::vector<std::tuple<int, int, int>>& coords, int stride) {
+    std::vector<uint64_t> keys;
     keys.reserve(coords.size());
 
     // Pack coordinates into keys
@@ -293,12 +275,12 @@ std::vector<uint32_t> compute_unique_sorted(const std::vector<std::tuple<int, in
 
     // Python then explicitly sorts: `sorted_keys = sorted(keys)`
     // To match this behavior, we sort the keys after the simulated radix sort.
-    std::vector<uint32_t> sorted_keys = keys; // Copy keys (potentially modified by radix_sort_with_memtrace simulation)
+    std::vector<uint64_t> sorted_keys = keys; // Copy keys (potentially modified by radix_sort_with_memtrace simulation)
     std::sort(sorted_keys.begin(), sorted_keys.end()); // Perform an actual sort
 
     // Deduplication
     current_phase = "Dedup"; // Set phase for any (commented out) accesses during deduplication
-    std::vector<uint32_t> unique_keys;
+    std::vector<uint64_t> unique_keys;
     if (!sorted_keys.empty()) {
         unique_keys.push_back(sorted_keys[0]);
         // Python's record_access for first unique key write was commented out.
@@ -319,14 +301,14 @@ std::vector<uint32_t> compute_unique_sorted(const std::vector<std::tuple<int, in
     if (debug) {
         std::cout << "Sorted+Unique Keys:" << std::endl;
         for (const auto& k : unique_keys) {
-            auto [px, py, pz] = unpack32(k); // Unpack for printing
+            auto [px, py, pz] = unpack32s(k); // Unpack for printing
             std::cout << "key=" << to_hex_string(k) << ", coords=(" << px << "," << py << "," << pz << ")" << std::endl;
         }
     }
     return unique_keys;
 }
 
-QueryData build_queries(const std::vector<uint32_t>& uniq_in, int stride, const std::vector<std::tuple<int, int, int>>& offsets) {
+QueryData build_queries(const std::vector<uint64_t>& uniq_in, int stride, const std::vector<std::tuple<int, int, int>>& offsets) {
     size_t M = uniq_in.size(); // Number of unique input keys
     size_t K = offsets.size(); // Number of offsets
     size_t total_queries = M * K;
@@ -347,14 +329,14 @@ QueryData build_queries(const std::vector<uint32_t>& uniq_in, int stride, const 
         // Let's assume it means pack32(odx, ody, odz) or similar. Python's *coords takes variable length.
         // If pack32(0, odx, ody, odz) was intended to use the first 3 of these 4, it's pack32(0, odx, ody).
         // The unpack32s for woffs implies it's a 3-coord key.
-        uint32_t off_key = pack32(odx, ody, odz); // Assuming offset itself is packed like a coordinate.
+        uint64_t off_key = pack32(odx, ody, odz); // Assuming offset itself is packed like a coordinate.
 
         for (size_t i_idx = 0; i_idx < M; ++i_idx) { // Iterate over each unique input key
             size_t idx = k_idx * M + i_idx; // Linear index for the query
             // int thread_id = idx % NUM_THREADS; // Example if accesses were recorded
 
-            uint32_t in_key = uniq_in[i_idx];
-            auto [x_in, y_in, z_in] = unpack32(in_key); // Unpack input key
+            uint64_t in_key = uniq_in[i_idx];
+            auto [x_in, y_in, z_in] = unpack32s(in_key); // Unpack input key
 
             // Calculate new coordinates by applying offset
             int x_new = x_in + odx;
@@ -377,7 +359,7 @@ QueryData build_queries(const std::vector<uint32_t>& uniq_in, int stride, const 
     return qd;
 }
 
-TilesPivots make_tiles_and_pivots(const std::vector<uint32_t>& uniq_in, int tile_size) {
+TilesPivots make_tiles_and_pivots(const std::vector<uint64_t>& uniq_in, int tile_size) {
     TilesPivots result;
     if (tile_size <= 0) { // Basic validation for tile_size
         if (debug) std::cerr << "Warning: tile_size is non-positive in make_tiles_and_pivots." << std::endl;
@@ -390,7 +372,7 @@ TilesPivots make_tiles_and_pivots(const std::vector<uint32_t>& uniq_in, int tile
     }
 
     for (size_t start = 0; start < uniq_in.size(); start += tile_size) {
-        std::vector<uint32_t> tile;
+        std::vector<uint64_t> tile;
         size_t end = std::min(start + static_cast<size_t>(tile_size), uniq_in.size());
         for(size_t i = start; i < end; ++i) {
             tile.push_back(uniq_in[i]);
@@ -418,13 +400,13 @@ void record_access_local(int thread_id, const std::string& op, uint64_t addr) {
 // Worker function executed by each thread in the lookup_phase.
 void process_query_range(
     int q_start, int q_end, int thread_id, // Range of queries for this thread and its ID
-    const std::vector<uint32_t>& uniq_keys_c, // Const ref to unique input keys
-    const std::vector<uint32_t>& qkeys_c,     // Const ref to query keys
+    const std::vector<uint64_t>& uniq_keys_c, // Const ref to unique input keys
+    const std::vector<uint64_t>& qkeys_c,     // Const ref to query keys
     const std::vector<uint32_t>& qii_c,       // Const ref to query input-indices
     const std::vector<uint32_t>& qki_c,       // Const ref to query kernel-indices
-    const std::vector<uint32_t>& woffs_c,     // Const ref to weight-offset keys
-    const std::vector<std::vector<uint32_t>>& tiles_c, // Const ref to data tiles
-    const std::vector<uint32_t>& pivots_c,    // Const ref to pivot keys
+    const std::vector<uint64_t>& woffs_c,     // Const ref to weight-offset keys
+    const std::vector<std::vector<uint64_t>>& tiles_c, // Const ref to data tiles
+    const std::vector<uint64_t>& pivots_c,    // Const ref to pivot keys
     int tile_size_p,                          // Tile size parameter
     KernelMap& kernel_map_ref,                // Reference to the shared kernel map
     std::mutex& kernel_map_lock,              // Mutex for kernel_map_ref
@@ -434,7 +416,7 @@ void process_query_range(
 
     for (int q = q_start; q < q_end; ++q) { // Process assigned range of queries
         record_access_local(thread_id, "R", QK_BASE + static_cast<uint64_t>(q) * SIZE_KEY); // Read query key
-        uint32_t target = qkeys_c[q]; // The query key to search for
+        uint64_t target = qkeys_c[q]; // The query key to search for
 
         // Backward search on pivots to find the relevant tile
         int lo = 0, hi = static_cast<int>(pivots_c.size()) - 1;
@@ -475,7 +457,7 @@ void process_query_range(
                         KernelMapEntry entry = std::make_tuple(
                             unpack32(target),                // Coords of the found key (target)
                             unpack32(uniq_keys_c[i_idx_val]), // Coords of the original input key
-                            unpack32s(woffs_c[q])            // Signed coords of the offset
+                            unpack32(woffs_c[q])            // Signed coords of the offset
                         );
                         { // Lock kernel_map for writing
                             std::lock_guard<std::mutex> guard(kernel_map_lock);
@@ -503,13 +485,13 @@ void process_query_range(
 }
 
 KernelMap lookup_phase(
-    const std::vector<uint32_t>& uniq,
-    const std::vector<uint32_t>& qkeys,
+    const std::vector<uint64_t>& uniq,
+    const std::vector<uint64_t>& qkeys,
     const std::vector<uint32_t>& qii,
     const std::vector<uint32_t>& qki,
-    const std::vector<uint32_t>& woffs,
-    const std::vector<std::vector<uint32_t>>& tiles,
-    const std::vector<uint32_t>& pivots,
+    const std::vector<uint64_t>& woffs,
+    const std::vector<std::vector<uint64_t>>& tiles,
+    const std::vector<uint64_t>& pivots,
     int tile_size) {
 
     KernelMap kernel_map_result;         // The final kernel map to be populated
