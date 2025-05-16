@@ -18,7 +18,7 @@
 import threading
 
 # ── Global Memory Trace Setup ──
-mem_trace = []
+gmem_trace = []
 current_phase = None
 debug = False
 
@@ -33,8 +33,13 @@ phases = {
 "Lookup-Backward": 5,
 "Lookup-Forward": 6,
 }
-tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'WV': 7}
+tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'TILE': 7}
 ops = {'R': 0, 'W': 1}
+
+
+
+# Number of input tiles and pivots for speeding up backward search
+I_TILES = 2
 
 ## Tensor Regions
 # ── Base addresses and sizes ──
@@ -48,29 +53,57 @@ ops = {'R': 0, 'W': 1}
 # KM: Kernel-map writes
 # WO: Weight-offset keys
 # WV: Weight values
-U_BASE    = 0x10000000
-QK_BASE   = 0x20000000
-QI_BASE   = 0x30000000
-QO_BASE   = 0x40000000
-PIV_BASE  = 0x50000000
-TILE_BASE = U_BASE
-KM_BASE   = 0x70000000
-WO_BASE   = 0x80000000
-WV_BASE   = 0x90000000
+I_BASE    = 0x10000000 # Base address for input point coordinates. Input feature vectors get separate region
+QK_BASE   = 0x20000000 # Query keys. We construct an explicit query keys by combining offset with input keys. In real minuet this would be done on-the-fly. There should be no acceses recorded to this region
+QI_BASE   = 0x30000000 # Query input-index array. Helper metadata.
+QO_BASE   = 0x40000000 # Query offset-index array. Helper metadata. 
+PIV_BASE  = 0x50000000 # Tile pivot keys
+TILE_BASE = I_BASE
+KM_BASE   = 0x60000000 # Kernel map writes. This is where the kernel map is written to.
+WO_BASE   = 0x80000000 # Reading the weight offsets from memory
+
+# The feature vectors. Moving into 64 bit space now to avoid collisions between 
+# small metadata tensors and larger feature vectors.
+IV_BASE = 0x100000000 # Base address for input feature vectors. This is where the input feature vectors are stored.
+WV_BASE = 0x800000000
+
+
+def address_to_tensor(addr):
+    """Convert address to tensor name."""
+    if addr >= I_BASE and addr < QK_BASE:
+        return 'I'
+    elif addr >= QK_BASE and addr < QI_BASE:
+        return 'QK'
+    elif addr >= QI_BASE and addr < QO_BASE:
+        return 'QI'
+    elif addr >= QO_BASE and addr < PIV_BASE:
+        return 'QO'
+    elif addr >= PIV_BASE and addr < TILE_BASE:
+        return 'PIV'
+    elif addr >= TILE_BASE and addr < KM_BASE:
+        return 'TILE'
+    elif addr >= KM_BASE and addr < WO_BASE:
+        return 'KM'
+    elif addr >= WO_BASE and addr < WV_BASE:
+        return 'WO'
+    else:
+        return 'Unknown'
+
+
 
 SIZE_KEY    = 4   # 32-bit keys
 SIZE_INT    = 4
 SIZE_WEIGHT = 4
 
 
-def write_mem_trace(filename):
+def write_gmem_trace(filename):
     """Write memory trace to a file in compressed integer format."""
     # Create mappings for strings to integers
     phases = {}
     
     # Create compressed trace
     compressed_trace = []
-    for entry in mem_trace:
+    for entry in gmem_trace:
         phase, thread_id, op, tensor, addr = entry
         
         # Map phase to integer (assign new ID if not seen before)
@@ -98,11 +131,11 @@ def write_mem_trace(filename):
         # Phase id, thread id, ops, tensor_id  map to bytes
         # Format should be BBBBI 
         for entry in compressed_trace:
-            print(entry)
+            # print(entry)
             f.write(struct.pack('BBBBI', *entry))
     
     print(f"Memory trace written to {filename}")
-    print(f"Compressed {len(mem_trace)} entries")
+    print(f"Compressed {len(gmem_trace)} entries")
     print(f"Phase mapping: {phases}")
 
 
@@ -110,25 +143,9 @@ def write_mem_trace(filename):
 
 def record_access(thread_id, op, addr):
     """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
-    # Determine tensor by address
-    if U_BASE <= addr < QK_BASE:
-        tensor = 'I'
-    elif QK_BASE <= addr < QI_BASE:
-        tensor = 'QK'
-    elif QI_BASE <= addr < QO_BASE:
-        tensor = 'QI'
-    elif QO_BASE <= addr < PIV_BASE:
-        tensor = 'QO'
-    elif PIV_BASE <= addr < KM_BASE:
-        tensor = 'PIV'
-    elif KM_BASE <= addr < WO_BASE:
-        tensor = 'KM'
-    elif WO_BASE <= addr < WV_BASE:
-        tensor = 'WO'
-    else:
-        tensor = 'WV'
+    tensor = address_to_tensor(addr)
     entry = (current_phase, thread_id, op, tensor, hex(addr))
-    mem_trace.append(entry)
+    gmem_trace.append(entry)
     # print(f"[{current_phase}] Thread{thread_id} {op} {tensor}@{hex(addr)}")
 
 
@@ -199,10 +216,10 @@ def compute_unique_sorted(coords, stride):
         qx, qy, qz = x//stride, y//stride, z//stride
         key = pack32(qx, qy, qz)
         keys.append(key)
-        # record_access(t_id, 'W', U_BASE + idx*SIZE_KEY)
+        # record_access("G",t_id, 'W', I_BASE + idx*SIZE_KEY)
 
     # Radix sort
-    radix_sort_with_memtrace(keys, U_BASE)
+    radix_sort_with_memtrace(keys, I_BASE)
     sorted_keys = sorted(keys)
     # Deduplication. Cleaning up to ensure each point occurs only once.
     current_phase = 'Dedup'
@@ -210,10 +227,10 @@ def compute_unique_sorted(coords, stride):
     last = None
     for idx, k in enumerate(sorted_keys):
         t_id = (idx % NUM_THREADS) + 1
-        # record_access(t_id, 'R', U_BASE + idx*SIZE_KEY)
+        # record_access("G",t_id, 'R', I_BASE + idx*SIZE_KEY)
         if k != last:
             unique.append(k)
-            # record_access(t_id, 'W', U_BASE + (len(unique)-1)*SIZE_KEY)
+            # record_access("G",t_id, 'W', I_BASE + (len(unique)-1)*SIZE_KEY)
             last = k
 
     # Print results
@@ -249,13 +266,13 @@ def build_queries(uniq_in, stride, offsets):
             # Repack with non-negative values
             qkeys[idx] = pack32(x_new, y_new, z_new)
 
-            # record_access(thread_id, 'W', QK_BASE + idx*SIZE_KEY)
+            # record_access("G",thread_id, 'W', QK_BASE + idx*SIZE_KEY)
             qii[idx]   = i_idx
-            # record_access(thread_id, 'W', QI_BASE + idx*SIZE_INT)
+            # record_access("G",thread_id, 'W', QI_BASE + idx*SIZE_INT)
             qki[idx]   = k_idx
-            # record_access(thread_id, 'W', QO_BASE + idx*SIZE_INT)
+            # record_access("G",thread_id, 'W', QO_BASE + idx*SIZE_INT)
             woffs[idx] = off_key
-            # record_access(thread_id, 'W', WO_BASE + idx*SIZE_KEY)
+            # record_access("G",thread_id, 'W', WO_BASE + idx*SIZE_KEY)
     return qkeys, qii, qki, woffs
 
 # ── Tile and Pivot Generation ──. Assuming tiling is free. 
@@ -273,21 +290,37 @@ def make_tiles_and_pivots(uniq_in, tile_size):
 def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
     kernel_map = {k: [] for k in range(len(set(qki)))}
     Nq = len(qkeys)
-
     # Thread synchronization
     kernel_map_lock = threading.Lock()
+    
+    # Create thread-local storage
+    thread_local = threading.local()
+    
+    def record_access_local(thread_id, op, addr):
+        """Record a memory access in thread-local storage"""
+        # Initialize thread-local trace list if needed
+        if not hasattr(thread_local, 'lmem_trace'):
+            thread_local.lmem_trace = []
+            
+        tensor = address_to_tensor(addr)
+        entry = (current_phase, thread_id, op, tensor, hex(addr))
+        thread_local.lmem_trace.append(entry)
+    
+    
+
 
     # Worker function for parallel execution
     def process_query(q_start, q_end, thread_id):
+        thread_local.lmem_trace = []
         for q in range(q_start, q_end):
-            record_access(thread_id, 'R', QK_BASE + q*SIZE_KEY)
+            record_access_local(thread_id, 'R', QK_BASE + q*SIZE_KEY)
             target = qkeys[q]
             
             # backward search on pivots
             lo, hi = 0, len(pivots)-1
             while lo<=hi:
                 mid=(lo+hi)//2
-                record_access(thread_id, 'R', PIV_BASE+mid*SIZE_KEY)
+                record_access_local(thread_id, 'R', PIV_BASE+mid*SIZE_KEY)
                 if pivots[mid]<=target: lo=mid+1
                 else: hi=mid-1
             if hi<0: hi = 0
@@ -295,17 +328,24 @@ def lookup_phase(uniq, qkeys, qii, qki, woffs, tiles, pivots, tile_size):
             
             # forward scan
             for j,val in enumerate(tiles[tile_idx]):
-                record_access(thread_id, 'R', TILE_BASE+(base_off+j)*SIZE_KEY)
+                record_access_local(thread_id, 'R', TILE_BASE+(base_off+j)*SIZE_KEY)
                 if val==target:
                     i_idx, k_idx = qii[q], qki[q]
                     with kernel_map_lock:
                         kernel_map[k_idx].append((unpack32(val), unpack32(uniq[i_idx]), unpack32s(woffs[q])))
+                        record_access_local(thread_id, 'W', KM_BASE + k_idx*SIZE_KEY)
                     addr_i=KM_BASE+q*2*SIZE_INT
                     addr_j=addr_i+SIZE_INT
-                    # record_access(thread_id, 'W', addr_i)
-                    # record_access(thread_id, 'W', addr_j)
+                    # record_access("G",thread_id, 'W', addr_i)
+                    # record_access("G",thread_id, 'W', addr_j)
+                    # Transfer local trace to global trace and reset
                     break
-    
+            with kernel_map_lock:
+                if hasattr(thread_local, 'lmem_trace') and thread_local.lmem_trace:
+                    # print(f"Thread {thread_id} trace entries: {len(thread_local.lmem_trace)}")
+                    gmem_trace.extend(thread_local.lmem_trace)
+                    thread_local.lmem_trace = []  # Clear after transfer
+            
     # Create threads to process data in parallel
     threads = []
     chunk_size = (Nq + NUM_THREADS - 1) // NUM_THREADS  # Ceiling division
@@ -332,8 +372,7 @@ if __name__ == '__main__':
     coords = [(1,5,0),(0,1,1),(0,0,2),(0,0,3)]
     stride = 1
     offsets = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
-    offsets = [(-1,-1,1)]
-    tile_size = 2
+    # offsets = [(-1,-1,1)]
 
     # Phase 1
     current_phase = 'Radix-Sort'
@@ -354,7 +393,7 @@ if __name__ == '__main__':
     # Phase 4
     current_phase = 'Tile-Pivots'
     print('--- Phase: Make Tiles & Pivots ---')
-    tiles, pivots = make_tiles_and_pivots(uniq,tile_size)
+    tiles, pivots = make_tiles_and_pivots(uniq,I_TILES)
     
     # for w in woffs:
     #    print(unpack32s(w))
@@ -362,7 +401,7 @@ if __name__ == '__main__':
     # Phase 5
     current_phase = 'Lookup'
     print('--- Phase: Lookup ---')
-    km = lookup_phase(uniq,qkeys,qii,qki,woffs,tiles,pivots,tile_size)
+    km = lookup_phase(uniq,qkeys,qii,qki,woffs,tiles,pivots,I_TILES)
     current_phase = None
     if debug:
         print('\nSorted Source Array:', [unpack32(k) for k in uniq])
@@ -371,8 +410,8 @@ if __name__ == '__main__':
         print('Kernel Map:', km)
     
     print('\nMemory Trace Entries:')
-    for e in mem_trace: print(e)
-    write_mem_trace('memory_trace.bin.gz')
+    for e in gmem_trace: print(e)
+    write_gmem_trace('memory_trace.bin.gz')
 
 
 
