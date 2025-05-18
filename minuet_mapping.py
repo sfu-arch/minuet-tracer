@@ -181,9 +181,9 @@ def compute_unique_sorted_coords(in_coords, stride):
     # Print results
     if debug:    
         print("Sorted+Unique Keys with Original Indices:")
-        for idx, idxc_item in enumerate(uniq_coords):
-            c = idxc_item.coord
-            print(f"key={hex(c.to_key())}, coords=({c.x}, {c.y}, {c.z}), original_input_index={idxc_item.orig_idx}")
+        for idx, idxc_item in enumerate(uniq_coords): # Renamed idxc_item to idxc_item
+            coord = idxc_item.coord # Renamed c to coord
+            print(f"key={hex(coord.to_key())}, coords=({coord.x}, {coord.y}, {coord.z}), original_input_index={idxc_item.orig_idx}")
     
     return uniq_coords
 
@@ -200,34 +200,29 @@ def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords
     
     for off_idx, (dx, dy, dz) in enumerate(off_coords):
         offset = Coord3D(dx, dy, dz)
-        qoff = offset.quantized(stride)
-        # off_key = pack32(0, qoff.x, qoff.y, qoff.z) # This seems to be for weight offsets
+        q_offset = offset.quantized(stride) # Renamed qoff to q_offset
         
-        for in_idx, idxc_item in enumerate(uniq_coords):
+        for in_idx, src_idxcoord in enumerate(uniq_coords): # Renamed idxc_item to src_idxcoord
             qry_idx = off_idx * num_inputs + in_idx
             # Get Coord3D from IndexedCoord
-            in_coord = idxc_item.coord
-            original_input_idx = idxc_item.orig_idx # Original index from initial input
+            src_coord = src_idxcoord.coord # Renamed in_coord to src_coord
+            original_input_idx = src_idxcoord.orig_idx
 
             # Create new coordinate by adding offset
-            qry_coord_obj = Coord3D(
-                in_coord.x + qoff.x,
-                in_coord.y + qoff.y,
-                in_coord.z + qoff.z
+            query_coord = Coord3D( # Renamed qry_coord_obj to query_coord
+                src_coord.x + q_offset.x,
+                src_coord.y + q_offset.y,
+                src_coord.z + q_offset.z
             )
             
             # Store the Coord3D object itself in IndexedCoord for qry_keys
             # The orig_idx here is the original_input_idx of the *source* coordinate that generated this query
-            qry_keys[qry_idx] = IndexedCoord(qry_coord_obj, original_input_idx)
-            qry_in_idx[qry_idx] = in_idx # Index within the unique_coords list
+            qry_keys[qry_idx] = IndexedCoord(query_coord, original_input_idx)
+            qry_in_idx[qry_idx] = in_idx 
             qry_off_idx[qry_idx] = off_idx
             
-            # wt_offsets stores the packed key of the offset vector itself.
-            # Let's ensure off_key is calculated correctly for wt_offsets.
-            # The original code for off_key was: pack32(0, qoff.x, qoff.y, qoff.z)
-            # This seems correct for representing the offset.
-            current_offset_key = pack32(0, qoff.x, qoff.y, qoff.z) # Re-calculate or use from outer loop
-            wt_offsets[qry_idx] = current_offset_key
+            offset_key = pack32(0, q_offset.x, q_offset.y, q_offset.z) # Renamed current_offset_key to offset_key
+            wt_offsets[qry_idx] = offset_key
     
     return qry_keys, qry_in_idx, qry_off_idx, wt_offsets
 
@@ -279,15 +274,14 @@ def perform_coordinate_lookup(uniq_coords: List[IndexedCoord], qry_keys: List[In
                 
             # Read query key
             record_local(thread_id, 'R', QK_BASE + qry_idx*SIZE_KEY)            
-            # qry_keys[qry_idx].coord is now a Coord3D object, convert to key for comparison
-            current_qry_key_int = qry_keys[qry_idx].coord.to_key()
+            qry_key_val = qry_keys[qry_idx].coord.to_key() # Renamed current_qry_key_int to qry_key_val
             
             # Binary search on pivots
             low, high = 0, len(pivs)-1
             while low <= high:
                 mid = (low + high) // 2
                 record_local(thread_id, 'R', PIV_BASE + mid*SIZE_KEY)
-                if pivs[mid] <= current_qry_key_int:
+                if pivs[mid] <= qry_key_val:
                     low = mid + 1
                 else:
                     high = mid - 1
@@ -298,45 +292,34 @@ def perform_coordinate_lookup(uniq_coords: List[IndexedCoord], qry_keys: List[In
                 
             # Search within the identified tile
             tile_idx = high
-            base_offset = tile_idx * tile_size # For memory trace, not direct list indexing
+            base_offset = tile_idx * tile_size 
             
             # Linear scan through the tile (which contains IndexedCoord objects)
-            for j, tile_indexed_coord in enumerate(tiles[tile_idx]):
+            for j, tile_idxcoord in enumerate(tiles[tile_idx]): # Renamed tile_indexed_coord to tile_idxcoord
                 record_local(thread_id, 'R', TILE_BASE + (base_offset + j)*SIZE_KEY)
                 
-                key_from_tile_int = tile_indexed_coord.coord.to_key()
+                tile_key_val = tile_idxcoord.coord.to_key() # Renamed key_from_tile_int to tile_key_val
                 
-                if key_from_tile_int == current_qry_key_int:
+                if tile_key_val == qry_key_val:
                     # Match found
-                    # in_idx is the index into uniq_coords for the *source* of the query
-                    source_in_idx = qry_in_idx[qry_idx] 
-                    current_off_idx = qry_off_idx[qry_idx]
+                    src_uniq_idx = qry_in_idx[qry_idx] # Renamed source_in_idx to src_uniq_idx
+                    curr_off_idx = qry_off_idx[qry_idx] # Renamed current_off_idx to curr_off_idx
                     
-                    # Get the Coord3D and original_input_idx of the *source* coordinate that formed the query
-                    # This is from uniq_coords, using source_in_idx
-                    source_indexed_coord = uniq_coords[source_in_idx]
-                    # out_coord_obj = source_indexed_coord.coord # This is the source Coord3D
-                    out_coord_key_int = source_indexed_coord.coord.to_key() # Key of the source coord
-                    # The original_idx for the output side of the kernel map entry is the one from qry_keys
-                    # which corresponds to the original input index of the source coordinate.
-                    output_original_idx = qry_keys[qry_idx].orig_idx
+                    src_idxc = uniq_coords[src_uniq_idx] # Renamed source_indexed_coord to src_idxc
+                    src_coord_key = src_idxc.coord.to_key() # Renamed out_coord_key_int to src_coord_key
+                    query_src_orig_idx = qry_keys[qry_idx].orig_idx # Renamed output_original_idx to query_src_orig_idx
 
 
                     # Add to kernel map with thread safety
                     with kmap_lock:
-                        # in_coord is the (x,y,z) of the matched coordinate from the input set (found in tile)
-                        # key_from_tile_int is its key.
-                        in_coord_tuple = unpack32(key_from_tile_int)
-                        # i_idx for the input side of kernel map is the original input index of the matched tile coordinate
-                        input_original_idx = tile_indexed_coord.orig_idx
+                        target_coord_tpl = unpack32(tile_key_val) # Renamed in_coord_tuple to target_coord_tpl
+                        target_orig_idx = tile_idxcoord.orig_idx # Renamed input_original_idx to target_orig_idx
 
-                        # out_coord is the (x,y,z) of the source coordinate (from uniq_coords)
-                        out_coord_tuple = unpack32(out_coord_key_int)
-                        # off_coord_tuple = unpack32s(wt_offsets[qry_idx]) # Not directly used in kmap value
+                        src_coord_tpl = unpack32(src_coord_key) # Renamed out_coord_tuple to src_coord_tpl
 
-                        kmap[current_off_idx].append(((in_coord_tuple, input_original_idx), 
-                                                      (out_coord_tuple, output_original_idx)))
-                        record_local(thread_id, 'W', KM_BASE + current_off_idx*SIZE_KEY)
+                        kmap[curr_off_idx].append(((target_coord_tpl, target_orig_idx), 
+                                                      (src_coord_tpl, query_src_orig_idx)))
+                        record_local(thread_id, 'W', KM_BASE + curr_off_idx*SIZE_KEY)
                     
                     break
         
@@ -471,14 +454,14 @@ if __name__ == '__main__':
     # Phase 4: Create tiles and pivots for lookup optimization
     curr_phase = 'Tile-Pivots'
     print('--- Phase: Make Tiles & Pivots ---')
-    c_tiles, pivs = create_tiles_and_pivots(uniq_coords, I_TILES)
+    coord_tiles, pivs = create_tiles_and_pivots(uniq_coords, I_TILES) # Renamed c_tiles to coord_tiles
     
     # Phase 5: Perform coordinate lookup
     curr_phase = 'Lookup'
     print('--- Phase: Lookup ---')
     kmap = perform_coordinate_lookup(
         uniq_coords, qry_keys, qry_in_idx,
-        qry_off_idx, wt_offsets, c_tiles, pivs, I_TILES
+        qry_off_idx, wt_offsets, coord_tiles, pivs, I_TILES
     )
     
     curr_phase = None
@@ -486,9 +469,9 @@ if __name__ == '__main__':
     # Print debug information
     if debug:
         print('\nSorted Source Array (Coordinate, Original Index):')
-        for idxc_item in uniq_coords: # uniq_coords is List[IndexedCoord]
-            coord_obj = idxc_item.coord
-            print(f"  key={hex(coord_obj.to_key())}, coords=({coord_obj.x}, {coord_obj.y}, {coord_obj.z}), index={idxc_item.orig_idx}")
+        for idxc_item in uniq_coords: # Renamed idxc_item to idxc_item
+            coord = idxc_item.coord # Renamed coord_obj to coord
+            print(f"  key={hex(coord.to_key())}, coords=({coord.x}, {coord.y}, {coord.z}), index={idxc_item.orig_idx}")
             
         print('\nQuery Segments:')
         for off_idx in range(len(off_coords)):
@@ -496,7 +479,7 @@ if __name__ == '__main__':
                        if qry_off_idx[i] == off_idx]
             # segment contains IndexedCoord objects where .coord is now a Coord3D object
             # To print the (x,y,z) of these query coordinates:
-            print(f"  Offset {off_coords[off_idx]}: {[(ic.coord.x, ic.coord.y, ic.coord.z) for ic in segment]}")
+            print(f"  Offset {off_coords[off_idx]}: {[(idxc.coord.x, idxc.coord.y, idxc.coord.z) for idxc in segment]}") # Renamed ic to idxc
 
     print('\nKernel Map:')
     for off_idx, matches in kmap.items():
