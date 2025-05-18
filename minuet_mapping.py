@@ -7,9 +7,9 @@ from typing import List, Tuple, Dict, Set
 from coord import pack32, unpack32, unpack32s, Coord3D
 from tqdm import tqdm
 # ── Global Memory Trace Setup ──
-gmem_trace = []
-current_phase = None
-debug = False
+mem_trace = []
+curr_phase = None
+debug = True
 
 # Number of virtual threads (parameterizable)
 NUM_THREADS = 4  # example: 3 parallel virtual threads
@@ -64,7 +64,7 @@ class IndexedCoord:
         return cls(Coord3D.from_key(key), idx)
 
 
-def address_to_tensor(addr):
+def addr_to_tensor(addr):
     """Convert address to tensor name."""
     if addr >= I_BASE and addr < QK_BASE:
         return 'I'
@@ -90,8 +90,8 @@ def write_gmem_trace(filename):
     phase_map = {}
     
     # Create compressed trace
-    compressed_trace = []
-    for entry in gmem_trace:
+    comp_trace = []
+    for entry in mem_trace:
         phase, thread_id, op, tensor, addr = entry
         
         # Map phase to integer (assign new ID if not seen before)
@@ -103,28 +103,28 @@ def write_gmem_trace(filename):
         addr_int = int(addr, 16)
         
         # Create compressed entry (all integers)
-        compressed_entry = (phase_id, thread_id, ops[op], tensors[tensor], addr_int)
-        compressed_trace.append(compressed_entry)
+        comp_entry = (phase_id, thread_id, ops[op], tensors[tensor], addr_int)
+        comp_trace.append(comp_entry)
     
     # Write to binary file for maximum compression
     with gzip.open(filename, 'wb') as f:
         # Write header with entry count
-        f.write(struct.pack('I', len(compressed_trace)))
+        f.write(struct.pack('I', len(comp_trace)))
         
         # Write each entry as packed integers (BBBBI format)
-        for entry in compressed_trace:
+        for entry in comp_trace:
             f.write(struct.pack('BBBBI', *entry))
     
     print(f"Memory trace written to {filename}")
-    print(f"Compressed {len(gmem_trace)} entries")
+    print(f"Compressed {len(mem_trace)} entries")
     print(f"Phase mapping: {phase_map}")
 
 
 def record_access(thread_id, op, addr):
     """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
-    tensor = address_to_tensor(addr)
-    entry = (current_phase, thread_id, op, tensor, hex(addr))
-    gmem_trace.append(entry)
+    tensor = addr_to_tensor(addr)
+    entry = (curr_phase, thread_id, op, tensor, hex(addr))
+    mem_trace.append(entry)
 
 
 
@@ -153,132 +153,141 @@ def radix_sort_with_memtrace(arr, base):
     return arr
 
 # ── Unique-Sort Inputs with Fixed Virtual Threads ──
-def compute_unique_sorted_coords(input_coords, stride):
+def compute_unique_sorted_coords(in_coords, stride):
     # Pack & write keys along with original indices
-    indexed_keys = []
-    for idx, (x, y, z) in enumerate(input_coords):
+    idx_keys = []
+    for idx, (x, y, z) in enumerate(in_coords):
         coord = Coord3D(x, y, z)
-        quantized = coord.quantized(stride)
-        key = quantized.to_key()
-        indexed_keys.append((key, idx)) 
+        qtz = coord.quantized(stride)
+        key = qtz.to_key()
+        idx_keys.append((key, idx)) 
 
     # Extract raw keys for memory trace simulation of radix sort
-    raw_keys = [item[0] for item in indexed_keys]
+    raw_keys = [item[0] for item in idx_keys]
     radix_sort_with_memtrace(raw_keys, I_BASE)
 
-    # Sort indexed_keys by key, preserving original index
-    sorted_items = sorted(indexed_keys, key=lambda item: item[0])
+    # Sort idx_keys by key, preserving original index
+    sorted_items = sorted(idx_keys, key=lambda item: item[0])
 
-    # Deduplication. Store (unique_key, original_index)
-    unique_indexed_coords = []
+    # Deduplication. Store IndexedCoord(Coord3D_obj, original_index_from_input)
+    uniq_coords = []
     last_key = None
-    for item_idx, (key, original_idx) in enumerate(sorted_items):
+    for item_idx, (key, orig_idx_from_input) in enumerate(sorted_items):
         if key != last_key:
-            unique_indexed_coords.append((key, original_idx))
+            # Store IndexedCoord with Coord3D and original input index
+            uniq_coords.append(IndexedCoord.from_key_and_index(key, orig_idx_from_input))
             last_key = key
 
     # Print results
     if debug:    
         print("Sorted+Unique Keys with Original Indices:")
-        for idx, (key, original_idx_val) in enumerate(unique_indexed_coords):
-            coord = Coord3D.from_key(key)
-            print(f"key={hex(key)}, coords=({coord.x}, {coord.y}, {coord.z}), original_input_index={original_idx_val}")
+        for idx, idxc_item in enumerate(uniq_coords):
+            c = idxc_item.coord
+            print(f"key={hex(c.to_key())}, coords=({c.x}, {c.y}, {c.z}), original_input_index={idxc_item.orig_idx}")
     
-    return unique_indexed_coords
+    return uniq_coords
 
 # Build queries for the kernel map
-def build_coordinate_queries(unique_indexed_coords, stride, offset_coords):
-    num_inputs = len(unique_indexed_coords)
-    num_offsets = len(offset_coords)
+def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords):
+    num_inputs = len(uniq_coords)
+    num_offsets = len(off_coords)
     total_queries = num_inputs * num_offsets
     
-    query_keys = [None] * total_queries
-    query_input_indices = [0] * total_queries
-    query_offset_indices = [0] * total_queries
-    weight_offsets = [0] * total_queries
+    qry_keys = [None] * total_queries
+    qry_in_idx = [0] * total_queries
+    qry_off_idx = [0] * total_queries
+    wt_offsets = [0] * total_queries
     
-    for offset_idx, (dx, dy, dz) in enumerate(offset_coords):
+    for off_idx, (dx, dy, dz) in enumerate(off_coords):
         offset = Coord3D(dx, dy, dz)
-        quantized_offset = offset.quantized(stride)
-        offset_key = pack32(0, quantized_offset.x, quantized_offset.y, quantized_offset.z)
+        qoff = offset.quantized(stride)
+        # off_key = pack32(0, qoff.x, qoff.y, qoff.z) # This seems to be for weight offsets
         
-        for input_idx, (input_key, original_input_idx) in enumerate(unique_indexed_coords):
-            query_idx = offset_idx * num_inputs + input_idx
-            
-            # Unpack input coordinates
-            input_coord = Coord3D.from_key(input_key)
-            
+        for in_idx, idxc_item in enumerate(uniq_coords):
+            qry_idx = off_idx * num_inputs + in_idx
+            # Get Coord3D from IndexedCoord
+            in_coord = idxc_item.coord
+            original_input_idx = idxc_item.orig_idx # Original index from initial input
+
             # Create new coordinate by adding offset
-            query_coord = Coord3D(
-                input_coord.x + quantized_offset.x,
-                input_coord.y + quantized_offset.y,
-                input_coord.z + quantized_offset.z
+            qry_coord_obj = Coord3D(
+                in_coord.x + qoff.x,
+                in_coord.y + qoff.y,
+                in_coord.z + qoff.z
             )
             
-            # Pack coordinates into query key
-            query_keys[query_idx] = IndexedCoord(query_coord.to_key(), original_input_idx)
-            query_input_indices[query_idx] = input_idx
-            query_offset_indices[query_idx] = offset_idx
-            weight_offsets[query_idx] = offset_key
+            # Store the Coord3D object itself in IndexedCoord for qry_keys
+            # The orig_idx here is the original_input_idx of the *source* coordinate that generated this query
+            qry_keys[qry_idx] = IndexedCoord(qry_coord_obj, original_input_idx)
+            qry_in_idx[qry_idx] = in_idx # Index within the unique_coords list
+            qry_off_idx[qry_idx] = off_idx
+            
+            # wt_offsets stores the packed key of the offset vector itself.
+            # Let's ensure off_key is calculated correctly for wt_offsets.
+            # The original code for off_key was: pack32(0, qoff.x, qoff.y, qoff.z)
+            # This seems correct for representing the offset.
+            current_offset_key = pack32(0, qoff.x, qoff.y, qoff.z) # Re-calculate or use from outer loop
+            wt_offsets[qry_idx] = current_offset_key
     
-    return query_keys, query_input_indices, query_offset_indices, weight_offsets
+    return qry_keys, qry_in_idx, qry_off_idx, wt_offsets
 
 # Generate tiles and pivot keys for accelerating lookups
-def create_tiles_and_pivots(unique_indexed_coords, tile_size):
-    tiles, pivots = [], []
-    for start in range(0, len(unique_indexed_coords), tile_size):
-        tile_items = unique_indexed_coords[start:start+tile_size]
-        # Store only keys in tiles
+def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size):
+    tiles, pivs = [], []
+    for start in range(0, len(uniq_coords), tile_size):
+        tile_items = uniq_coords[start:start+tile_size] # List[IndexedCoord]
+        # Store IndexedCoord objects in tiles
         tiles.append([item for item in tile_items])
-        # Pivot is the key from the first tuple
-        pivots.append(tile_items[0][0])
-        record_access(0, 'W', PIV_BASE + (len(pivots)-1)*SIZE_KEY)
+        # Pivot is the key from the first IndexedCoord's Coord3D object
+        pivs.append(tile_items[0].coord.to_key())
+        record_access(0, 'W', PIV_BASE + (len(pivs)-1)*SIZE_KEY)
     
-    return tiles, pivots
+    return tiles, pivs
 
 # Lookup phase - main query processing
-def perform_coordinate_lookup(unique_indexed_coords, query_keys, query_input_indices, 
-                             query_offset_indices, weight_offsets, tiles, pivots, tile_size):
+def perform_coordinate_lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in_idx, 
+                             qry_off_idx, wt_offsets, tiles: List[List[IndexedCoord]], pivs, tile_size):
     # Initialize the kernel map for each offset
-    offset_count = len(set(query_offset_indices))
-    kernel_map = {k: [] for k in range(offset_count)}
-    query_count = len(query_keys)
+    off_count = len(set(qry_off_idx))
+    kmap = {k: [] for k in range(off_count)}
+    qry_count = len(qry_keys)
     
     # Thread synchronization
-    kernel_map_lock = threading.Lock()
-    thread_local = threading.local()
+    kmap_lock = threading.Lock()
+    t_local = threading.local()
     
     # Define batch size for processing
     BATCH_SIZE = 128  # Adjust this based on your workload characteristics
-    num_batches = (query_count + BATCH_SIZE - 1) // BATCH_SIZE  # Ceiling division
+    num_batches = (qry_count + BATCH_SIZE - 1) // BATCH_SIZE  # Ceiling division
     
-    def record_access_local(thread_id, op, addr):
+    def record_local(thread_id, op, addr):
         """Record a memory access in thread-local storage"""
-        if not hasattr(thread_local, 'local_trace'):
-            thread_local.local_trace = []
+        if not hasattr(t_local, 'local_trace'):
+            t_local.local_trace = []
             
-        tensor = address_to_tensor(addr)
-        entry = (current_phase, thread_id, op, tensor, hex(addr))
-        thread_local.local_trace.append(entry)
+        tensor = addr_to_tensor(addr)
+        entry = (curr_phase, thread_id, op, tensor, hex(addr))
+        t_local.local_trace.append(entry)
     
     # Worker function for parallel execution of a portion of a batch
     def process_batch_portion(batch_start, thread_id, thread_start, thread_end):
-        thread_local.local_trace = []
-        for query_offset in range(thread_start, thread_end):
-            query_idx = batch_start + query_offset
-            if query_idx >= query_count:
+        t_local.local_trace = []
+        for qry_offset in range(thread_start, thread_end):
+            qry_idx = batch_start + qry_offset
+            if qry_idx >= qry_count:
                 break  # Prevent going beyond array bounds
                 
             # Read query key
-            record_access_local(thread_id, 'R', QK_BASE + query_idx*SIZE_KEY)            
-            query_key = query_keys[query_idx].coord
+            record_local(thread_id, 'R', QK_BASE + qry_idx*SIZE_KEY)            
+            # qry_keys[qry_idx].coord is now a Coord3D object, convert to key for comparison
+            current_qry_key_int = qry_keys[qry_idx].coord.to_key()
             
             # Binary search on pivots
-            low, high = 0, len(pivots)-1
+            low, high = 0, len(pivs)-1
             while low <= high:
                 mid = (low + high) // 2
-                record_access_local(thread_id, 'R', PIV_BASE + mid*SIZE_KEY)
-                if pivots[mid] <= query_key:
+                record_local(thread_id, 'R', PIV_BASE + mid*SIZE_KEY)
+                if pivs[mid] <= current_qry_key_int:
                     low = mid + 1
                 else:
                     high = mid - 1
@@ -289,55 +298,73 @@ def perform_coordinate_lookup(unique_indexed_coords, query_keys, query_input_ind
                 
             # Search within the identified tile
             tile_idx = high
-            base_offset = tile_idx * tile_size
+            base_offset = tile_idx * tile_size # For memory trace, not direct list indexing
             
-            # Linear scan through the tile
-            for j, (key,i_idx) in enumerate(tiles[tile_idx]):
-                record_access_local(thread_id, 'R', TILE_BASE + (base_offset + j)*SIZE_KEY)
-                if key == query_key:
+            # Linear scan through the tile (which contains IndexedCoord objects)
+            for j, tile_indexed_coord in enumerate(tiles[tile_idx]):
+                record_local(thread_id, 'R', TILE_BASE + (base_offset + j)*SIZE_KEY)
+                
+                key_from_tile_int = tile_indexed_coord.coord.to_key()
+                
+                if key_from_tile_int == current_qry_key_int:
                     # Match found
-                    input_idx = query_input_indices[query_idx]
-                    offset_idx = query_offset_indices[query_idx]
+                    # in_idx is the index into uniq_coords for the *source* of the query
+                    source_in_idx = qry_in_idx[qry_idx] 
+                    current_off_idx = qry_off_idx[qry_idx]
                     
-                    # Extract the original unique key and its index
-                    unique_key, original_idx = unique_indexed_coords[input_idx]
+                    # Get the Coord3D and original_input_idx of the *source* coordinate that formed the query
+                    # This is from uniq_coords, using source_in_idx
+                    source_indexed_coord = uniq_coords[source_in_idx]
+                    # out_coord_obj = source_indexed_coord.coord # This is the source Coord3D
+                    out_coord_key_int = source_indexed_coord.coord.to_key() # Key of the source coord
+                    # The original_idx for the output side of the kernel map entry is the one from qry_keys
+                    # which corresponds to the original input index of the source coordinate.
+                    output_original_idx = qry_keys[qry_idx].orig_idx
+
 
                     # Add to kernel map with thread safety
-                    with kernel_map_lock:
-                        input_coord = unpack32(key)
-                        output_coord = unpack32(unique_key)
-                        offset_coord = unpack32s(weight_offsets[query_idx])
+                    with kmap_lock:
+                        # in_coord is the (x,y,z) of the matched coordinate from the input set (found in tile)
+                        # key_from_tile_int is its key.
+                        in_coord_tuple = unpack32(key_from_tile_int)
+                        # i_idx for the input side of kernel map is the original input index of the matched tile coordinate
+                        input_original_idx = tile_indexed_coord.orig_idx
 
-                        kernel_map[offset_idx].append(( (input_coord,i_idx), (output_coord,query_keys[query_idx].orig_idx)))
-                        record_access_local(thread_id, 'W', KM_BASE + offset_idx*SIZE_KEY)
+                        # out_coord is the (x,y,z) of the source coordinate (from uniq_coords)
+                        out_coord_tuple = unpack32(out_coord_key_int)
+                        # off_coord_tuple = unpack32s(wt_offsets[qry_idx]) # Not directly used in kmap value
+
+                        kmap[current_off_idx].append(((in_coord_tuple, input_original_idx), 
+                                                      (out_coord_tuple, output_original_idx)))
+                        record_local(thread_id, 'W', KM_BASE + current_off_idx*SIZE_KEY)
                     
                     break
         
         # Transfer thread-local trace to global trace
-        with kernel_map_lock:
-            if hasattr(thread_local, 'local_trace') and thread_local.local_trace:
-                gmem_trace.extend(thread_local.local_trace)
-                thread_local.local_trace = []
+        with kmap_lock:
+            if hasattr(t_local, 'local_trace') and t_local.local_trace:
+                mem_trace.extend(t_local.local_trace)
+                t_local.local_trace = []
     
     # Process queries in batches with tqdm progress bar
-    batch_iterator = tqdm(
+    batch_iter = tqdm(
         range(num_batches), 
         desc="Processing batches", 
         unit="batch", 
         disable=False
     )
     
-    for batch in batch_iterator:
+    for batch in batch_iter:
         batch_start = batch * BATCH_SIZE
-        batch_size = min(BATCH_SIZE, query_count - batch_start)
+        batch_size = min(BATCH_SIZE, qry_count - batch_start)
         
         if batch_size <= 0:
             break
         
         # Show additional info in the progress bar description
-        batch_iterator.set_postfix(
-            queries=f"{min(batch_start + batch_size, query_count)}/{query_count}",
-            matches=sum(len(matches) for matches in kernel_map.values())
+        batch_iter.set_postfix(
+            queries=f"{min(batch_start + batch_size, qry_count)}/{qry_count}",
+            matches=sum(len(matches) for matches in kmap.values())
         )
         
         # Divide this batch among threads
@@ -359,38 +386,34 @@ def perform_coordinate_lookup(unique_indexed_coords, query_keys, query_input_ind
         # Wait for all threads to complete processing this batch
         for thread in threads:
             thread.join()
-    return kernel_map
+    return kmap
 
 
-def write_kernel_map_to_gz(kernel_map_data: Dict[int, List[Tuple[Tuple[Coord3D, int], Tuple[Coord3D, int]]]], filename: str, offset_coords_list: List[Tuple[int,int,int]]):
+def write_kernel_map_to_gz(kmap_data: Dict[int, List[Tuple[Tuple[Coord3D, int], Tuple[Coord3D, int]]]], filename: str, off_list: List[Tuple[int,int,int]]):
     """
     Write the kernel map to a gzipped binary file.
     Format:
     - num_total_entries (uint32_t)
     For each entry:
-        - offset_idx (uint8_t)
+        - offset_idx (uint32_t)
         - input_coord_key (uint32_t)  (packed target coordinate)
         - input_coord_pos (uint32_t)  (original index of target coordinate)
         - output_coord_key (uint32_t) (packed source coordinate)
         - output_coord_pos (uint32_t) (original index of source coordinate)
     """
-    total_entries = sum(len(matches) for matches in kernel_map_data.values())
+    total_entries = sum(len(matches) for matches in kmap_data.values())
     
     packed_entries = []
-    for offset_idx_val, matches in kernel_map_data.items():
-        if not (0 <= offset_idx_val < 256):
-            print(f"Warning: offset_idx {offset_idx_val} is out of range for uint8_t. Skipping entries for this offset.")
-            continue # Or handle with a larger type if necessary
-
+    for off_idx, matches in kmap_data.items():
         for match in matches:
             # match is ((input_coord_tuple, input_original_idx), (output_coord_tuple, output_original_idx))
             # input_coord_tuple is the target coordinate found
             # output_coord_tuple is the source coordinate that, when offset, matched the target
             
-            input_coord_data, output_coord_data = match
+            in_coord_data, out_coord_data = match
             
-            input_xyz_tuple, input_pos = input_coord_data
-            output_xyz_tuple, output_pos = output_coord_data
+            in_xyz, in_pos = in_coord_data
+            out_xyz, out_pos = out_coord_data
             
             # Ensure input_xyz_tuple and output_xyz_tuple are indeed tuples (x,y,z)
             # The kernel_map stores them as Coord3D objects if created from unpack32 which returns tuples,
@@ -401,90 +424,90 @@ def write_kernel_map_to_gz(kernel_map_data: Dict[int, List[Tuple[Tuple[Coord3D, 
             # output_coord = unpack32(unique_key) -> tuple
             # So, input_xyz_tuple and output_xyz_tuple are (x,y,z) tuples.
 
-            input_key = pack32(input_xyz_tuple[0], input_xyz_tuple[1], input_xyz_tuple[2])
-            output_key = pack32(output_xyz_tuple[0], output_xyz_tuple[1], output_xyz_tuple[2])
-            offset_key = pack32(offset_coords_list[offset_idx_val][0], offset_coords_list[offset_idx_val][1], offset_coords_list[offset_idx_val][2])
+            in_key = pack32(in_xyz[0], in_xyz[1], in_xyz[2])
+            out_key = pack32(out_xyz[0], out_xyz[1], out_xyz[2])
+            off_key = pack32(off_list[off_idx][0], off_list[off_idx][1], off_list[off_idx][2])
             
             # Format: B (offset_idx), I (input_key), I (input_pos), I (output_key), I (output_pos)
-            packed_entry_data = struct.pack('IIIII', offset_key, input_key, input_pos, output_key, output_pos)
-            packed_entries.append(packed_entry_data)
+            packed_entry = struct.pack('IIIII', off_key, in_key, in_pos, out_key, out_pos)
+            packed_entries.append(packed_entry)
 
     # Verify total_entries matches len(packed_entries) in case of filtering
-    actual_entries_to_write = len(packed_entries)
+    actual_entries = len(packed_entries)
 
     with gzip.open(filename, 'wb') as f:
-        f.write(struct.pack('I', actual_entries_to_write)) # Header: total number of entries
+        f.write(struct.pack('I', actual_entries)) # Header: total number of entries
         for entry_data in packed_entries:
             f.write(entry_data)
             
     print(f"Kernel map written to {filename}")
-    print(f"Wrote {actual_entries_to_write} entries (expected {total_entries} before any filtering).")
+    print(f"Wrote {actual_entries} entries (expected {total_entries} before any filtering).")
 
 
 # ── Example Test with Phases ──
 if __name__ == '__main__':
     # Input data
-    input_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
+    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
     stride = 1
-   # offset_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
-    offset_coords = [(0,1,-1)]
+    off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
+    # off_coords = [(0,1,-1)]
     # Phase 1: Sort and deduplicate input coordinates
-    current_phase = 'Radix-Sort'
-    print(f"\n--- Phase: {current_phase} with {NUM_THREADS} threads ---")
-    unique_indexed_coords = compute_unique_sorted_coords(input_coords, stride)
+    curr_phase = 'Radix-Sort'
+    print(f"\n--- Phase: {curr_phase} with {NUM_THREADS} threads ---")
+    uniq_coords = compute_unique_sorted_coords(in_coords, stride)
 
     # Phase 2: Build query data structures
-    current_phase = 'Build-Queries'
+    curr_phase = 'Build-Queries'
     print('--- Phase: Build Queries ---')
-    query_keys, query_input_indices, query_offset_indices, weight_offsets = build_coordinate_queries(
-        unique_indexed_coords, stride, offset_coords
+    qry_keys, qry_in_idx, qry_off_idx, wt_offsets = build_coordinate_queries(
+        uniq_coords, stride, off_coords
     )
 
     # Phase 3: Sort query keys (using existing sorted keys)
-    current_phase = 'Sort-QKeys'
+    curr_phase = 'Sort-QKeys'
     print('--- Phase: Sort QKeys ---')
     # No sorting needed in this implementation
 
     # Phase 4: Create tiles and pivots for lookup optimization
-    current_phase = 'Tile-Pivots'
+    curr_phase = 'Tile-Pivots'
     print('--- Phase: Make Tiles & Pivots ---')
-    coordinate_tiles, tile_pivots = create_tiles_and_pivots(unique_indexed_coords, I_TILES)
+    c_tiles, pivs = create_tiles_and_pivots(uniq_coords, I_TILES)
     
     # Phase 5: Perform coordinate lookup
-    current_phase = 'Lookup'
+    curr_phase = 'Lookup'
     print('--- Phase: Lookup ---')
-    kernel_map = perform_coordinate_lookup(
-        unique_indexed_coords, query_keys, query_input_indices,
-        query_offset_indices, weight_offsets, coordinate_tiles, tile_pivots, I_TILES
+    kmap = perform_coordinate_lookup(
+        uniq_coords, qry_keys, qry_in_idx,
+        qry_off_idx, wt_offsets, c_tiles, pivs, I_TILES
     )
     
-    current_phase = None
+    curr_phase = None
     
     # Print debug information
     if debug:
         print('\nSorted Source Array (Coordinate, Original Index):')
-        for key, orig_idx in unique_indexed_coords:
-            coord = Coord3D.from_key(key)
-            print(f"  ({coord.x}, {coord.y}, {coord.z}), index={orig_idx}")
+        for idxc_item in uniq_coords: # uniq_coords is List[IndexedCoord]
+            coord_obj = idxc_item.coord
+            print(f"  key={hex(coord_obj.to_key())}, coords=({coord_obj.x}, {coord_obj.y}, {coord_obj.z}), index={idxc_item.orig_idx}")
             
         print('\nQuery Segments:')
-        for offset_idx in range(len(offset_coords)):
-            segment = [query_keys[i] for i in range(len(query_keys)) 
-                       if query_offset_indices[i] == offset_idx]
-            coords = [Coord3D.from_key(k) for k in segment]
-            print(f"  Offset {offset_coords[offset_idx]}: {[(c.x, c.y, c.z) for c in coords]}")
-        
+        for off_idx in range(len(off_coords)):
+            segment = [qry_keys[i] for i in range(len(qry_keys)) 
+                       if qry_off_idx[i] == off_idx]
+            # segment contains IndexedCoord objects where .coord is now a Coord3D object
+            # To print the (x,y,z) of these query coordinates:
+            print(f"  Offset {off_coords[off_idx]}: {[(ic.coord.x, ic.coord.y, ic.coord.z) for ic in segment]}")
+
     print('\nKernel Map:')
-    for offset_idx, matches in kernel_map.items():
+    for off_idx, matches in kmap.items():
         if matches:
-            print(f"  Offset {offset_coords[offset_idx]}: {matches}")
+            print(f"  Offset {off_coords[off_idx]}: {matches}")
     
     # Write memory trace to file
     print('\nMemory Trace Entries:')
-    for e in gmem_trace[:10]:  # Show first 10 entries only
+    for e in mem_trace[:10]:  # Show first 10 entries only
         print(e)
-    print(f"... and {len(gmem_trace)-10} more entries")
+    print(f"... and {len(mem_trace)-10} more entries")
     
     write_gmem_trace('map_trace.bin.gz')
-    write_kernel_map_to_gz(kernel_map, 'kernel_map.bin.gz', offset_coords)
-    
+    write_kernel_map_to_gz(kmap, 'kernel_map.bin.gz', off_coords)
