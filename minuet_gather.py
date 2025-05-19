@@ -28,14 +28,28 @@ def create_in_out_masks(kernel_map, num_sources, num_targets):
     out_mask = [-1] * (num_offsets * num_sources)
     in_mask = [-1] * (num_offsets * num_targets)
 
+    # Count slot_array for allocation
+    slot_array = []
+
     # fill in masks
     for o, matches in kernel_map.items():
-        for local_i, ((_, tgt_idx), (_, src_idx)) in enumerate(matches):
+        if len(matches) > 0:
+            slot_array.append(len(matches))
+        for local_i, (in_idx,out_idx) in enumerate(matches):
             # record where in the list this target appears
             # Preallocates a slot within the source buffer for the array.
-            in_mask[o * num_targets + tgt_idx] = local_i # Corrected to store local_i
+            in_mask[o * num_targets + in_idx] = local_i # Corrected to store local_i
             # record where in the list this source appears
-            out_mask[o * num_sources + src_idx] = local_i # Corrected to store local_i
+            out_mask[o * num_sources + out_idx] = local_i # Corrected to store local_i
+
+
+    slot_array = [0] + [sum(slot_array[:i+1]) for i in range(len(slot_array))]
+    offsets_active = [off_idx for off_idx, matches in kernel_map.items() if len(matches) > 0]
+    return out_mask, in_mask, offsets_active, slot_array
+
+
+
+
 
     return out_mask, in_mask
 
@@ -49,9 +63,7 @@ def worker_thread_task(
     num_points: int,
     num_tiles_per_pt: int, 
     tile_feat_size: int, 
-    bulk_feat_size: int, 
-    # t_warp_size is not directly used by this worker's indexing logic
-    
+    bulk_feat_size: int,     
     num_offsets: int,
     offset_cumsum_pad: list, 
     source_masks: list,

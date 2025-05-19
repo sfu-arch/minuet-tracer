@@ -9,7 +9,7 @@ from tqdm import tqdm
 # ── Global Memory Trace Setup ──
 mem_trace = []
 curr_phase = None
-debug = True
+debug = False
 
 # Number of virtual threads (parameterizable)
 NUM_THREADS = 4  # example: 3 parallel virtual threads
@@ -497,11 +497,18 @@ if __name__ == '__main__':
 
 ### End of minuet_mapping.py
 
-    from minuet_gather import create_in_out_masks
-    out_mask, in_mask = create_in_out_masks(kmap, len(in_coords), len(uniq_coords))
     
     # Sort kernel_map based on length of matches
+    # Weights with more matches are likely to be batched together
     sorted_kmap = sorted(kmap.items(), key=lambda item: len(item[1]), reverse=True)
+
+    print(sorted_kmap)
+
+    # Count slot_array for allocation
+    slot_array = []
+    for off_idx, matches in sorted_kmap:
+        if len(matches) > 0:
+            slot_array.append(len(matches))
 
     # Create kernel map like this: (offset_idx, source_original_idx, target_original_idx)
     # Example kmap entry for Offset 1: [(((target_coord_X, target_coord_Y, target_coord_Z), target_orig_idx=1), ((source_coord_X, source_coord_Y, source_coord_Z), source_orig_idx=2))]
@@ -514,7 +521,17 @@ if __name__ == '__main__':
             if off_idx not in idx_kmap:
                 idx_kmap[off_idx] = []
             idx_kmap[off_idx].append((src_idx, dst_idx))
-    print(idx_kmap)
+    
+    from minuet_gather import create_in_out_masks
+    out_mask, in_mask, offsets_active, slot_array = create_in_out_masks(idx_kmap, len(in_coords), len(uniq_coords))
+
+    print(slot_array)
+    print(offsets_active)
+
+    
+    
+    
+    
 
     # print("\nSorted Kernel Map by Length of Matches:")
     # for off_idx, matches in sorted_kmap:
