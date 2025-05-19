@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <functional>
 #include <type_traits> // For std::enable_if
-
+#include <cstring>
 // --- Forward declaration for tuple printing ---
 template<typename... Args>
 std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t);
