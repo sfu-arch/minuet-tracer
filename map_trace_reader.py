@@ -55,7 +55,7 @@ def read_trace(filename):
                 phase = PHASES.get(phase_id, f"Unknown-{phase_id}")
                 op = OPS.get(op_id, f"Unknown-{op_id}")
                 tensor = TENSORS.get(tensor_id, f"Unknown-{tensor_id}")
-                
+                print(phase_id)
                 entries.append({
                     'phase': phase,
                     'thread_id': thread_id,
@@ -79,6 +79,7 @@ def analyze_trace(entries):
     # Count operations by phase
     phase_ops = defaultdict(lambda: {'R': 0, 'W': 0})
     for entry in entries:
+        print(entry['phase'])
         phase_ops[entry['phase']][entry['op']] += 1
     
     # Count operations by tensor

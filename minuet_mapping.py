@@ -93,12 +93,8 @@ def write_gmem_trace(filename):
     comp_trace = []
     for entry in mem_trace:
         phase, thread_id, op, tensor, addr = entry
-        
-        # Map phase to integer (assign new ID if not seen before)
-        if phase not in phase_map:
-            phase_map[phase] = len(phase_map)
-        phase_id = phase_map[phase]
-        
+        phase_id = phases[phase]
+        print(phase_id)
         # Convert address from hex string to integer
         addr_int = int(addr, 16)
         
@@ -488,7 +484,7 @@ if __name__ == '__main__':
     
     # Write memory trace to file
     print('\nMemory Trace Entries:')
-    for e in mem_trace[:10]:  # Show first 10 entries only
+    for e in mem_trace[:1000]:  # Show first 10 entries only
         print(e)
     print(f"... and {len(mem_trace)-10} more entries")
     

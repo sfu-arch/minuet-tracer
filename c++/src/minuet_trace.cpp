@@ -108,12 +108,7 @@ void write_gmem_trace(const std::string& filename) {
     std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t, uint32_t>> compressed_trace_data; // Renamed
 
     for (const auto& entry : mem_trace) { // Use mem_trace
-        uint8_t phase_id;
-        if (local_phase_map.find(entry.phase) == local_phase_map.end()) {
-            local_phase_map[entry.phase] = static_cast<uint8_t>(local_phase_map.size());
-        }
-        phase_id = local_phase_map.at(entry.phase);
-
+        uint8_t phase_id = phases_map_global.at(entry.phase);
         uint8_t op_id = ops_map_global.at(entry.op);
         uint8_t tensor_id = tensors_map_global.at(entry.tensor);
         uint32_t addr_int = static_cast<uint32_t>(entry.addr); // Python converts hex string from trace
@@ -138,7 +133,6 @@ void write_gmem_trace(const std::string& filename) {
         uint8_t op_val = std::get<2>(centry);
         uint8_t tensor_val = std::get<3>(centry);
         uint32_t addr_val = std::get<4>(centry);
-
         if (gzwrite(outFile, &phase_val, sizeof(phase_val)) != sizeof(phase_val) ||
             gzwrite(outFile, &tid_val, sizeof(tid_val)) != sizeof(tid_val) ||
             gzwrite(outFile, &op_val, sizeof(op_val)) != sizeof(op_val) ||
