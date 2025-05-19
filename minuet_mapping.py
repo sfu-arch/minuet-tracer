@@ -196,7 +196,7 @@ def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords
     qry_keys = [None] * total_queries
     qry_in_idx = [0] * total_queries
     qry_off_idx = [0] * total_queries
-    wt_offsets = [0] * total_queries
+    wt_offsets = [None] * total_queries
     
     for off_idx, (dx, dy, dz) in enumerate(off_coords):
         offset = Coord3D(dx, dy, dz)
@@ -221,7 +221,7 @@ def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords
             qry_in_idx[qry_idx] = in_idx 
             qry_off_idx[qry_idx] = off_idx
             
-            offset_key = pack32(0, q_offset.x, q_offset.y, q_offset.z) # Renamed current_offset_key to offset_key
+            offset_key = pack32(q_offset.x, q_offset.y, q_offset.z) # Renamed current_offset_key to offset_key
             wt_offsets[qry_idx] = offset_key
     
     return qry_keys, qry_in_idx, qry_off_idx, wt_offsets
@@ -240,7 +240,7 @@ def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size):
     return tiles, pivs
 
 # Lookup phase - main query processing
-def perform_coordinate_lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in_idx, 
+def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in_idx, 
                              qry_off_idx, wt_offsets, tiles: List[List[IndexedCoord]], pivs, tile_size):
     # Initialize the kernel map for each offset
     off_count = len(set(qry_off_idx))
@@ -312,13 +312,13 @@ def perform_coordinate_lookup(uniq_coords: List[IndexedCoord], qry_keys: List[In
 
                     # Add to kernel map with thread safety
                     with kmap_lock:
-                        target_coord_tpl = unpack32(tile_key_val) # Renamed in_coord_tuple to target_coord_tpl
-                        target_orig_idx = tile_idxcoord.orig_idx # Renamed input_original_idx to target_orig_idx
+                        input_tpl = unpack32(tile_key_val) # Renamed in_coord_tuple to input_tpl
+                        input_idx = tile_idxcoord.orig_idx # Renamed input_original_idx to input_idx
 
-                        src_coord_tpl = unpack32(src_coord_key) # Renamed out_coord_tuple to src_coord_tpl
+                        out_coord_tpl = unpack32(src_coord_key) # Renamed out_coord_tuple to out_coord_tpl
 
-                        kmap[curr_off_idx].append(((target_coord_tpl, target_orig_idx), 
-                                                      (src_coord_tpl, query_src_orig_idx)))
+                        kmap[curr_off_idx].append(((input_tpl, input_idx), 
+                                                      (out_coord_tpl, query_src_orig_idx)))
                         record_local(thread_id, 'W', KM_BASE + curr_off_idx*SIZE_KEY)
                     
                     break
@@ -459,7 +459,7 @@ if __name__ == '__main__':
     # Phase 5: Perform coordinate lookup
     curr_phase = 'Lookup'
     print('--- Phase: Lookup ---')
-    kmap = perform_coordinate_lookup(
+    kmap = lookup(
         uniq_coords, qry_keys, qry_in_idx,
         qry_off_idx, wt_offsets, coord_tiles, pivs, I_TILES
     )
@@ -494,3 +494,38 @@ if __name__ == '__main__':
     
     write_gmem_trace('map_trace.bin.gz')
     write_kernel_map_to_gz(kmap, 'kernel_map.bin.gz', off_coords)
+
+### End of minuet_mapping.py
+
+    from minuet_gather import create_in_out_masks
+    out_mask, in_mask = create_in_out_masks(kmap, len(in_coords), len(uniq_coords))
+    
+    # Sort kernel_map based on length of matches
+    sorted_kmap = sorted(kmap.items(), key=lambda item: len(item[1]), reverse=True)
+
+    # Create kernel map like this: (offset_idx, source_original_idx, target_original_idx)
+    # Example kmap entry for Offset 1: [(((target_coord_X, target_coord_Y, target_coord_Z), target_orig_idx=1), ((source_coord_X, source_coord_Y, source_coord_Z), source_orig_idx=2))]
+    # dict[offset, List[(src_idx, dst_idx)]]
+    idx_kmap = {}
+    for off_idx, matches in sorted_kmap:
+        for in_coord, out_coord in matches:
+            src_idx = in_coord[1]
+            dst_idx = out_coord[1]
+            if off_idx not in idx_kmap:
+                idx_kmap[off_idx] = []
+            idx_kmap[off_idx].append((src_idx, dst_idx))
+    print(idx_kmap)
+
+    # print("\nSorted Kernel Map by Length of Matches:")
+    # for off_idx, matches in sorted_kmap:
+    #     if matches:
+    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
+    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
+
+    if debug:
+        print("Out Mask:")
+        for i in range(len(out_mask)):
+            print(off_coords[i // len(in_coords)], out_mask[i])
+        print("In Mask:")
+        for i in range(len(in_mask)):
+            print(off_coords[i // len(uniq_coords)], in_mask[i])
