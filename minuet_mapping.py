@@ -6,6 +6,8 @@ import bisect
 from typing import List, Tuple, Dict, Set
 from coord import pack32, unpack32, unpack32s, Coord3D
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
 # ── Global Memory Trace Setup ──
 mem_trace = []
 curr_phase = None
@@ -94,7 +96,7 @@ def write_gmem_trace(filename):
     for entry in mem_trace:
         phase, thread_id, op, tensor, addr = entry
         phase_id = phases[phase]
-        print(phase_id)
+        # print(phase_id)
         # Convert address from hex string to integer
         addr_int = int(addr, 16)
         
@@ -113,7 +115,7 @@ def write_gmem_trace(filename):
     
     print(f"Memory trace written to {filename}")
     print(f"Compressed {len(mem_trace)} entries")
-    print(f"Phase mapping: {phase_map}")
+    # print(f"Phase mapping: {phase_map}")
 
 
 def record_access(thread_id, op, addr):
@@ -484,7 +486,7 @@ if __name__ == '__main__':
     
     # Write memory trace to file
     print('\nMemory Trace Entries:')
-    for e in mem_trace[:1000]:  # Show first 10 entries only
+    for e in mem_trace[:10]:  # Show first 10 entries only
         print(e)
     print(f"... and {len(mem_trace)-10} more entries")
     
@@ -492,10 +494,13 @@ if __name__ == '__main__':
     write_kernel_map_to_gz(kmap, 'kernel_map.bin.gz', off_coords)
 
 ### End of minuet_mapping.py
+### Create Metadatas for kernel map
+#### - First sort the list of offsets based on the length of matches
+#### - Create an in, out mask for gather scatter [#Total slots * #Total points]
+#### - mask[offset_idx][point_idx] = -1 (if not matched) otherwise the position of input in original input array. The points in slot array are listed based on sorted order of coordinates.
+#### - offsets_active is a sparse list of offsets that have atleast one match
+#### - slot array is number of slots for each offset.
 
-    
-    # Sort kernel_map based on length of matches
-    # Weights with more matches are likely to be batched together
     sorted_kmap = sorted(kmap.items(), key=lambda item: len(item[1]), reverse=True)
 
     print(sorted_kmap)
@@ -519,15 +524,36 @@ if __name__ == '__main__':
             idx_kmap[off_idx].append((src_idx, dst_idx))
     
     from minuet_gather import create_in_out_masks
-    out_mask, in_mask, offsets_active, slot_array = create_in_out_masks(idx_kmap, len(in_coords), len(uniq_coords))
+    out_mask, in_mask, offsets_active, slot_addr = create_in_out_masks(idx_kmap, len(in_coords), len(uniq_coords))
 
-    print(slot_array)
+    print(slot_addr)
     print(offsets_active)
 
+    from minuet_gather import greedy_group
     
+    pos_indices, groups, membership = greedy_group(
+        slot_array,
+        alignment=4,
+        max_group=2,
+        max_slots=4
+    )
+
+    print("Groups metadata (start, end, base, req, alloc):")
+    for g in groups:
+        print(g)
     
-    
-    
+    # Print total space allocated by groups
+    total_alloc = sum(g[3] for g in groups)
+    print(f"\nTotal allocated space: {total_alloc} slots")
+
+    print("\nPer-position slot indices:")
+    print(pos_indices)
+
+    print("\nGroup membership lists:")
+    print(membership)
+
+    from minuet_gather import compact_bar_chart
+    compact_bar_chart(groups)
 
     # print("\nSorted Kernel Map by Length of Matches:")
     # for off_idx, matches in sorted_kmap:

@@ -1,7 +1,7 @@
 from itertools import islice
 import math
 import threading # Import the threading module
-
+import matplotlib.pyplot as plt
 
 def create_in_out_masks(kernel_map, num_sources, num_targets):
     """
@@ -47,14 +47,180 @@ def create_in_out_masks(kernel_map, num_sources, num_targets):
     offsets_active = [off_idx for off_idx, matches in kernel_map.items() if len(matches) > 0]
     return out_mask, in_mask, offsets_active, slot_array
 
+"""
+######## Algorithm for gemm grouping ########
+# We want to partition a sequence of positions into contiguous “groups” that each:
+- Start at an address divisible by the alignment (e.g. 4)
+- Contain at most max_group positions
+- Require at most max_slots raw slots before padding
+Minimize:
+  - The total number of groups
+  - Subject to the total wasted slots (padding)
+
+We employ a dynamic programming approach to solve this problem.
+The algorithm works as follows:
+- We define a DP array where dp[i] = (num_groups, wasted_slots) for the first i positions.
+- We iterate through the positions and for each position, we try to form groups of size k (1 <= k <= max_group).
+- For each group, we calculate the required slots and wasted slots.
+- We update the DP array with the minimum number of groups and wasted slots.
+- Finally, we reconstruct the groups and their positions from the DP array.
+- The output is a list of positions and their corresponding groups.
+- The algorithm is efficient and runs in O(n^2) time complexity, where n is the number of positions.
+- The algorithm is designed to be flexible and can handle different alignment, max_group, and max_slots constraints.
+"""
+
+def dp_group(
+    slots,
+    alignment=4,
+    max_group=6,
+    max_slots=None
+):
+    """
+    Groups positions under constraints:
+      - alignment boundary
+      - max positions per group
+      - optional max raw slots per group
+    Returns:
+      - pos_indices: list of absolute slot index where each position begins
+      - groups: list of (start_pos, end_pos, base_addr, required_slots, allocated_slots)
+    """
+    n = len(slots)
+    dp = [(float('inf'), float('inf'))] * (n + 1)
+    dp[n] = (0, 0)
+    choice = [0] * n
+
+    # DP to choose optimal group size at each index
+    for i in range(n - 1, -1, -1):
+        best = (float('inf'), float('inf'))
+        best_k = 1
+        for k in range(1, max_group + 1):
+            if i + k > n:
+                break
+            req = sum(slots[i:i+k])
+            if max_slots is not None and req > max_slots:
+                break
+            alloc = ((req + alignment - 1) // alignment) * alignment
+            waste = alloc - req
+            ng, nw = dp[i + k]
+            cand = (1 + ng, waste + nw)
+            if cand < best:
+                best = cand
+                best_k = k
+        dp[i] = best
+        choice[i] = best_k
+
+    # Reconstruct groups, per-position indices, and membership
+    pos_indices = []
+    groups = []
+    addr = 0
+    i = 0
+    while i < n:
+        k = choice[i]
+        req = sum(slots[i:i+k])
+        alloc = ((req + alignment - 1) // alignment) * alignment
+        groups.append((i, i+k-1, addr, req, alloc))
+        offset = 0
+        for s in slots[i:i+k]:
+            pos_indices.append(addr + offset)
+            offset += s
+        addr += alloc
+        i += k
+
+    # Build explicit membership lists
+    membership = [list(range(s, e+1)) for s, e, *_ in groups]
+
+    return pos_indices, groups, membership
 
 
+def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
+    """
+    Greedy grouping after sorting positions by descending slot requirement.
+
+    Args:
+      slots      : list of slot‐counts per position
+      alignment  : alignment boundary (e.g. 4)
+      max_group  : maximum number of positions per group
+      max_slots  : optional cap on raw slots per group (None to disable)
+
+    Returns:
+      pos_indices : list of absolute slot index where each original position begins
+      groups      : list of tuples (members, base_addr, req, alloc)
+      membership  : list of lists, each inner list is the positions in that group
+    """
+    n = len(slots)
+    # Verify list is sorted
+    if not all(slots[i] >= slots[i + 1] for i in range(n - 1)):
+        raise ValueError("slots must be sorted in descending order")
+    
+    # pair each slot with its original index, sort descending
+    # Slot is already sorted, so we can just enumerate
+    # DO NOT SORT AGAIN
+    indexed = list(enumerate(slots))
+    addr = 0
+    cur_sum = 0
+    cur_count = 0
+    cur_members = []
+
+    groups = []
+    pos_indices = [None] * n
+
+    def flush_group():
+        nonlocal addr, cur_sum, cur_count, cur_members
+        if not cur_members:
+            return
+        req = cur_sum
+        alloc = ((req + alignment - 1) // alignment) * alignment
+        if len(cur_members) == 1:
+            cur_members.append(cur_members[0])
+        groups.append((cur_members.copy(), addr, req, alloc))
+        addr += alloc
+        cur_sum = 0
+        cur_count = 0
+        cur_members.clear()
+
+    # process each position in descending‐slot order
+    for idx, size in indexed:
+        # if adding this would violate constraints, flush current
+        if (cur_count >= max_group) or \
+           (max_slots is not None and cur_sum + size > max_slots):
+            flush_group()
+
+        # record this position’s start index
+        pos_indices[idx] = addr + cur_sum
+
+        # add to current group
+        cur_members.append(idx)
+        cur_sum += size
+        cur_count += 1
+
+    # flush any trailing group
+    flush_group()
+
+    # build membership lists
+    membership = [members for members, _, _, _ in groups]
+
+    return pos_indices, groups, membership
+
+def compact_bar_chart(groups):
+    """Plot one bar per group, labeled by [start_pos–end_pos]@start_addr."""
+    fig, ax = plt.subplots(figsize=(10, len(groups) * 0.5))
+    
+    plot_groups = []
+    for idx, (se, addr, req, alloc) in enumerate(groups):
+        plot_groups.append((se[0], se[1], addr, req, alloc))
+
+    for idx, (s, e, addr, req, alloc) in enumerate(plot_groups):
+        ax.broken_barh([(addr, alloc)], (idx - 0.4, 0.8))
+        ax.text(addr + alloc / 2, idx, f"[{s}-{e}] @{addr}",
+                ha='center', va='center')
+    ax.set_xlabel('Memory address (slots)')
+    ax.set_yticks([])
+    ax.set_title('Compact Group Bar Chart')
+    plt.tight_layout()
+    plt.show()
 
 
-    return out_mask, in_mask
-
-
-def worker_thread_task(
+def gather_thread(
     # Arguments defining this thread's share of work
     log_tid: int, 
     num_threads: int, 
@@ -116,21 +282,21 @@ def worker_thread_task(
                     tile_data[tile_data_idx] = sources[gsrc_idx]
             
             # 2. STORE PHASE for the currently loaded tile
-            for off_cfg_idx in range(num_offsets): 
-                mask_idx = off_cfg_idx * num_points + pt_idx 
+            for off_idx, off_key in enumerate(offsets): 
+                mask_idx = off_key * num_points + pt_idx 
                 
                 assert(0 <= mask_idx < len(source_masks))
                 
                 dest_slot_relidx = source_masks[mask_idx] 
                 
                 if dest_slot_relidx == -1: continue # Offset not present for this point
-                # This assert remains valid as offset_cumsum_pad is still indexed by off_cfg_idx
-                assert(0 <= off_cfg_idx < len(offset_cumsum_pad))
+                # This assert remains valid as offset_cumsum_pad is still indexed by off_idx
+                assert(0 <= off_idx < len(offset_cumsum_pad))
                 
                 # MODIFIED LOGIC FOR dest_slot_base:
-                # Assumes offset_cumsum_pad[off_cfg_idx] is the base *feature* address for this offset config's block,
+                # Assumes offset_cumsum_pad[off_idx] is the base *feature* address for this offset config's block,
                 # and dest_slot_relidx is the local *slot* index (0-indexed) of the point within this block.
-                dest_slot_base = (offset_cumsum_pad[off_cfg_idx] + dest_slot_relidx) * total_feats_per_pt
+                dest_slot_base = (offset_cumsum_pad[off_idx] + dest_slot_relidx) * total_feats_per_pt
 
                 if tile_feat_size > 0:
 
@@ -193,9 +359,9 @@ def python_threaded_gather_simulation(
     # Create and start each thread
     for i in range(num_threads): # Use updated num_threads
         log_tid = i 
-        # Create a thread object, targeting the worker_thread_task function
+        # Create a thread object, targeting the gather_thread function
         thread_obj = threading.Thread( 
-            target=worker_thread_task,
+            target=gather_thread,
             args=(
                 log_tid,
                 num_threads,
