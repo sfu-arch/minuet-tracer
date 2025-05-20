@@ -230,7 +230,7 @@ def gather_thread(
     num_tiles_per_pt: int, 
     tile_feat_size: int, 
     bulk_feat_size: int,     
-    num_offsets: int,
+    offsets: int,
     offset_cumsum_pad: list, 
     source_masks: list,
     sources: list,
@@ -328,7 +328,7 @@ def python_threaded_gather_simulation(
     bulk_feat_size: int, 
     num_threads: int, 
     # Data arrays
-    num_offsets: int,
+    offsets: list[int],
     offset_cumsum_pad: list, 
     source_masks: list,
     sources: list,
@@ -369,7 +369,7 @@ def python_threaded_gather_simulation(
                 num_tiles_per_pt,
                 tile_feat_size,
                 bulk_feat_size,
-                num_offsets,
+                offsets,
                 offset_cumsum_pad,
                 source_masks,
                 sources,
@@ -409,8 +409,8 @@ if __name__ == '__main__':
     _src_masks_data = [-1]*(_num_pts * _n_offsets) # Placeholder for source masks
     # First offset has local indices for the first 4 points, rest are -1
     # Second offset has local indices for the last 4 points, rest are -1
-    _src_masks_data = [0,1,2,3,-1,-1,-1,-1, \
-                       0,-1,-1,-1,-1,-1,-1,-1]                  
+    _src_masks_data = [-1,-1,-1,-1,-1,-1,-1,-1, \
+                       0,1,2,3,-1,-1,-1,-1]                  
     _offsets_cumsum = [0]*(_n_offsets+1) # Placeholder for cumulative offsets
 
         # Populate the cumulative offsets based on the source masks
@@ -432,7 +432,7 @@ if __name__ == '__main__':
         tile_feat_size=_tile_feats,
         bulk_feat_size=_bulk_feats,
         num_threads=_n_threads, # Updated parameter name
-        num_offsets=_n_offsets,
+        offsets=[1],
         offset_cumsum_pad=_offsets_cumsum, # Updated parameter name
         source_masks=_src_masks_data,
         sources=_src_data,
