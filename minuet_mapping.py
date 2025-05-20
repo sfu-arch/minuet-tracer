@@ -561,7 +561,7 @@ if __name__ == '__main__':
     #         print(f"  Offset {off_coords[off_idx]}: {matches}")
     # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
 
-    if debug:
+    if True:
         print("Out Mask:")
         for i in range(len(out_mask)):
             print(off_coords[i // len(in_coords)], out_mask[i])

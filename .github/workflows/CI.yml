@@ -60,4 +60,4 @@ jobs:
           python3 minuet_mapping.py
           # Ensure the trace file from the C++ version is used if that's intended
           # For now, assuming map_trace.bin.gz is from the python script run
-          python3 trace_reader.py map_trace.bin.gz --filter-phase "Lookup"
+          python3 map_trace_reader.py map_trace.bin.gz --filter-phase "Lookup"
