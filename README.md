@@ -16,7 +16,7 @@ There are three main scripts in this repository:
 
 ```bash
 # Python version
-python3 minuet_mapping.py 
+python3 minuet_trace.py 
 # c++ version. 
 cd c++; cmake -B build; cd build; make
 ./minuet_mapping

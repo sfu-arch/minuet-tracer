@@ -1,6 +1,7 @@
 # ── Global Memory Trace Setup ──
 mem_trace = []
 debug = False
+output_dir = 'out/'
 
 # Number of virtual threads (parameterizable)
 NUM_THREADS = 4  # example: 3 parallel virtual threads

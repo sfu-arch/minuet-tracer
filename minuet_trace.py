@@ -1,7 +1,7 @@
 from minuet_mapping import *
 from minuet_gather import *
 from minuet_config import *
-
+import os
 # ── Example Test with Phases ──
 if __name__ == '__main__':
     global phase
@@ -10,6 +10,9 @@ if __name__ == '__main__':
     stride = 1
     off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     # off_coords = [(0,1,-1)]
+    
+    ####################### Phase 1 Mapping #######################
+    
     # Phase 1: Sort and deduplicate input coordinates
     print(f"\n--- Phase: {curr_phase} with {NUM_THREADS} threads ---")
     uniq_coords = compute_unique_sorted_coords(in_coords, stride)
@@ -64,10 +67,18 @@ if __name__ == '__main__':
         print(e)
     print(f"... and {len(mem_trace)-10} more entries")
     
-    write_gmem_trace('map_trace.bin.gz')
-    write_kernel_map_to_gz(kmap, 'kernel_map.bin.gz', off_coords)
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    write_gmem_trace(output_dir+'map_trace.bin.gz')
+    write_kernel_map_to_gz(kmap, output_dir+'kernel_map.bin.gz', off_coords)
 
 ### End of minuet_mapping.py
+    ########################################################################################################################################################
+    
+    ############## Phase 2: Gather/Scatter Metadata Generation ##############
+
 ### Create Metadatas for kernel map
 #### - First sort the list of offsets based on the length of matches
 #### - Create an in, out mask for gather scatter [#Total slots * #Total points]
@@ -99,28 +110,60 @@ if __name__ == '__main__':
             idx_kmap[off_idx].append((src_idx, dst_idx))
     
     from minuet_gather import create_in_out_masks
-    out_mask, in_mask, offsets_active, slot_addr = create_in_out_masks(idx_kmap, len(off_coords), len(in_coords), len(uniq_coords))
+    out_mask, in_mask, offsets_active, slot_addr, metadata_checksum = create_in_out_masks(idx_kmap, len(off_coords), len(in_coords), len(uniq_coords))
 
 
     if debug:
         print(slot_addr)
         print(offsets_active)
-        # print("Out Mask:")
-        # for i in range(len(out_mask)):
-        #     print(off_coords[i // len(in_coords)], out_mask[i])
-        # print("In Mask:")
-        # for i in range(len(in_mask)):
-        #     print(off_coords[i // len(uniq_coords)], in_mask[i])
+        print(out_mask)
+        print(in_mask)
+    
+    matches = 0
+    for entry, item in out_mask.items():
+        matches += len(item)
+    print(f"Total matches: {matches} out of {len(off_coords)*len(in_coords)}")
+    print(f"Metadata Checksum: {metadata_checksum}")
+
+    # print("Out Mask:")
+    # for i in range(len(out_mask)):
+    #     print(off_coords[i // len(in_coords)], out_mask[i])
+    # print("In Mask:")
+    # for i in range(len(in_mask)):
+    #     print(off_coords[i // len(uniq_coords)], in_mask[i])
+       # Replace the current mask printing with this more readable version
+    # print("\n=== Out Mask (showing non-default entries only) ===")
+    # print("Format: Offset (x,y,z) -> [source_idx] = (local_idx, source_idx)")
+    
+    # print("\n=== In Mask (showing non-default entries only) ===")
+    # print("Format: Offset (x,y,z) -> [target_idx] = (local_idx, target_idx)")
+    # non_default_count = 0
+    
+    # # Group by offset for readability
+    # for o in range(len(off_coords)):
+    #     entries = []
+    #     for t in range(len(uniq_coords)):
+    #         mask_idx = o * len(uniq_coords) + t
+    #         if mask_idx < len(in_mask) and in_mask[mask_idx] != (-1, -1):
+    #             entries.append(f"[{t}] = {in_mask[mask_idx]}")
+    #             non_default_count += 1
+                
+    #     if entries:  # Only print offsets that have matches
+    #         print(f"Offset {off_coords[o]}: {', '.join(entries)}")
+    
+    # print(f"Total non-default entries: {non_default_count} out of {len(in_mask)}")
+
+
 
     from minuet_gather import greedy_group
     
-    pos_indices, groups, membership, gemm_list = greedy_group(
+    pos_indices, groups, membership, gemm_list, gemm_checksum = greedy_group(
         idx_kmap,
         offsets_active,
         slot_array,
-        alignment=4,
-        max_group=2,
-        max_slots=4
+        alignment=GEMM_ALIGNMENT,
+        max_group=GEMM_WT_GROUP,
+        max_slots=GEMM_SIZE,
     )
     
     if debug:
@@ -143,6 +186,18 @@ if __name__ == '__main__':
 
         print("\nGroup membership lists:")
         print(membership)
+
+
+    # Write all checksums to file as json
+    checksums = {
+        "metadata.bin.gz": metadata_checksum,
+        "gemms.bin.gz": gemm_checksum,
+    }
+    
+    import json    
+    with open(output_dir+'checksums.json', 'w') as f:
+        json.dump(checksums, f, indent=2)
+
 
     from minuet_gather import compact_bar_chart
     compact_bar_chart(groups)

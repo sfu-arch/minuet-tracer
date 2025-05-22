@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(MinuetTraceConverter)
 
 # Set C++ standard to C++17
@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # Find ZLIB (required for gzip compression)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED) 
+find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(pybind11 CONFIG REQUIRED)
 # Add the executable
 add_executable(minuet_trace_cpp
     src/main.cpp
