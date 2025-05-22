@@ -1,15 +1,21 @@
 from itertools import islice
+import threading # Import the threading module
+import matplotlib.pyplot as plt
+import gzip
 import math
 import threading # Import the threading module
 import matplotlib.pyplot as plt
+import gzip
+import struct
 
-def create_in_out_masks(kernel_map, num_sources, num_targets):
+def create_in_out_masks(kernel_map, num_offsets, num_sources, num_targets):
     """
     Args:
       kernel_map   : dict[int, List[
                        ((tgt_coord, tgt_idx),
                         (src_coord, src_idx))
                      ]]
+      num_offsets  : total number of offsets (O)
       num_sources  : total number of source points (N_in)
       num_targets  : total number of target points (N_out)
 
@@ -21,12 +27,12 @@ def create_in_out_masks(kernel_map, num_sources, num_targets):
       in_mask     : List[int] of length (num_offsets * num_targets)
                      where in_mask[o * num_targets + t] = local index
                      of target t in kernel_map[o], or -1 if absent.
-    """
-    num_offsets = max(kernel_map.keys()) + 1
+    """ 
+    # + 1
 
     # initialize both to -1
-    out_mask = [-1] * (num_offsets * num_sources)
-    in_mask = [-1] * (num_offsets * num_targets)
+    out_mask = [(-1,-1)] * (num_offsets * num_sources)
+    in_mask = [(-1,-1)] * (num_offsets * num_targets)
 
     # Count slot_array for allocation
     slot_array = []
@@ -38,9 +44,9 @@ def create_in_out_masks(kernel_map, num_sources, num_targets):
         for local_i, (in_idx,out_idx) in enumerate(matches):
             # record where in the list this target appears
             # Preallocates a slot within the source buffer for the array.
-            in_mask[o * num_targets + in_idx] = local_i # Corrected to store local_i
+            in_mask[o * num_targets + in_idx] = (local_i, in_idx) # Corrected to store local_i
             # record where in the list this source appears
-            out_mask[o * num_sources + out_idx] = local_i # Corrected to store local_i
+            out_mask[o * num_sources + out_idx] = (local_i, out_idx) # Corrected to store local_i
 
 
     slot_array = [0] + [sum(slot_array[:i+1]) for i in range(len(slot_array))]
@@ -132,7 +138,7 @@ def dp_group(
     return pos_indices, groups, membership
 
 
-def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
+def greedy_group(idx_kmap, offsets_active, slots, alignment=4, max_group=6, max_slots=None, gemm_list = "gemms.bin.gz"):
     """
     Greedy grouping after sorting positions by descending slot requirement.
 
@@ -199,12 +205,155 @@ def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
     # build membership lists
     membership = [members for members, _, _, _ in groups]
 
-    return pos_indices, groups, membership
+
+    gemm_list = []
+    for g in groups:
+            gemm_list.append({
+            'num_offsets': g[0][1]-g[0][0]+1,
+            'gemm_M': g[3],
+            'gemm_N': g[0][1]-g[0][0]+1,
+            'offsets': [[offsets_active[i]] for i in range(g[0][0], g[0][1]+1)], # Corrected to use offsets_active
+            'inputs': tuple(pair[0] for i in range(g[0][0], g[0][1]+1) for pair in idx_kmap.get(offsets_active[i], [])),
+            'outs': tuple(pair[1] for i in range(g[0][0], g[0][1]+1) for pair in idx_kmap.get(offsets_active[i], [])), # Corrected similarly for 'outs'
+            'padding': g[3]-g[2]
+        })
+            
+    # Write out the gemm list to file.
+    write_gemm_list(gemm_list)
+
+    return pos_indices, groups, membership, gemm_list
+
+
+def write_gemm_list(gemm_data_list, filename = "gemms.bin.gz"):
+    """
+    Write the gemm list to a file in a packed binary format,
+    compressed with gzip.
+    Each GEMM entry is structured as:
+    - num_offsets (unsigned int)
+    - gemm_M (unsigned int)
+    - padding (unsigned int)
+    - len_inputs (unsigned int)
+    - len_outs (unsigned int)
+    - offsets_data (num_offsets * unsigned int)
+    - inputs_data (len_inputs * unsigned int)
+    - outs_data (len_outs * unsigned int)
+    All integers are packed in network byte order (!).
+    """
+    with gzip.open(filename, 'wb') as f: # Open in binary write mode
+        for gemm in gemm_data_list:
+            num_offsets = gemm['num_offsets']
+            gemm_M = gemm['gemm_M']
+            # gemm['gemm_N'] is the same as num_offsets, so it's implicitly covered
+            padding = gemm['padding']
+            
+            inputs_tuple = gemm['inputs']
+            outs_tuple = gemm['outs']
+            
+            len_inputs = len(inputs_tuple)
+            len_outs = len(outs_tuple)
+
+            # Pack header: num_offsets, gemm_M, padding, len_inputs, len_outs
+            # Using network byte order '!' for consistency, 'I' for 4-byte unsigned int.
+            header_format = '!IIIII' 
+            packed_header = struct.pack(header_format, 
+                                        num_offsets, 
+                                        gemm_M, 
+                                        padding, 
+                                        len_inputs, 
+                                        len_outs)
+            f.write(packed_header)
+
+            # Pack offsets data
+            # gemm['offsets'] is a list of single-element lists, e.g., [[val1], [val2], ...]
+            if num_offsets > 0:
+                offsets_format = '!' + 'I' * num_offsets
+                actual_offsets = [item[0] for item in gemm['offsets']]
+                packed_offsets = struct.pack(offsets_format, *actual_offsets)
+                f.write(packed_offsets)
+
+            # Pack inputs data
+            if len_inputs > 0:
+                inputs_format = '!' + 'I' * len_inputs
+                packed_inputs = struct.pack(inputs_format, *inputs_tuple)
+                f.write(packed_inputs)
+
+            # Pack outs data
+            if len_outs > 0:
+                outs_format = '!' + 'I' * len_outs
+                packed_outs = struct.pack(outs_format, *outs_tuple)
+                f.write(packed_outs)
+
+def read_gemm_list(filename):
+    """
+    Read the gemm list from a packed binary, gzipped file.
+    Returns a list of GEMM dictionaries.
+    """
+    gemm_data_list = []
+    
+    # Define the format and size of the fixed-size header
+    # num_offsets, gemm_M, padding, len_inputs, len_outs
+    header_format = '!IIIII' 
+    header_size = struct.calcsize(header_format)
+
+    with gzip.open(filename, 'rb') as f: # Open in binary read mode
+        while True:
+            # Read the header for the next GEMM entry
+            packed_header = f.read(header_size)
+            if not packed_header:
+                break # End of file
+            if len(packed_header) < header_size:
+                raise EOFError("Incomplete GEMM header found. File might be corrupted.")
+
+            num_offsets, gemm_M, padding, len_inputs, len_outs = struct.unpack(header_format, packed_header)
+
+            gemm_entry = {
+                'num_offsets': num_offsets,
+                'gemm_M': gemm_M,
+                'gemm_N': num_offsets, # Reconstruct gemm_N, as it's num_offsets
+                'padding': padding,
+                'offsets': [],
+                'inputs': (),
+                'outs': ()
+            }
+
+            # Read offsets data
+            if num_offsets > 0:
+                offsets_format = '!' + 'I' * num_offsets
+                offsets_size = struct.calcsize(offsets_format)
+                packed_offsets = f.read(offsets_size)
+                if len(packed_offsets) < offsets_size:
+                    raise EOFError("Incomplete offsets data. File might be corrupted.")
+                unpacked_offsets = struct.unpack(offsets_format, packed_offsets)
+                # Store offsets in the same format as originally: list of single-element lists
+                gemm_entry['offsets'] = [[val] for val in unpacked_offsets]
+
+            # Read inputs data
+            if len_inputs > 0:
+                inputs_format = '!' + 'I' * len_inputs
+                inputs_size = struct.calcsize(inputs_format)
+                packed_inputs = f.read(inputs_size)
+                if len(packed_inputs) < inputs_size:
+                    raise EOFError("Incomplete inputs data. File might be corrupted.")
+                gemm_entry['inputs'] = struct.unpack(inputs_format, packed_inputs)
+            
+            # Read outs data
+            if len_outs > 0:
+                outs_format = '!' + 'I' * len_outs
+                outs_size = struct.calcsize(outs_format)
+                packed_outs = f.read(outs_size)
+                if len(packed_outs) < outs_size:
+                    raise EOFError("Incomplete outs data. File might be corrupted.")
+                gemm_entry['outs'] = struct.unpack(outs_format, packed_outs)
+            
+            gemm_data_list.append(gemm_entry)
+            
+    return gemm_data_list
+
 
 def compact_bar_chart(groups):
     """Plot one bar per group, labeled by [start_pos–end_pos]@start_addr."""
     fig, ax = plt.subplots(figsize=(10, len(groups) * 0.5))
-    
+
     plot_groups = []
     for idx, (se, addr, req, alloc) in enumerate(groups):
         plot_groups.append((se[0], se[1], addr, req, alloc))
@@ -230,7 +379,7 @@ def gather_thread(
     num_tiles_per_pt: int, 
     tile_feat_size: int, 
     bulk_feat_size: int,     
-    offsets: int,
+    offsets: list[int], # List of offsets with atleast one match. The index should be global index in offset list.
     offset_cumsum_pad: list, 
     source_masks: list,
     sources: list,
@@ -289,14 +438,14 @@ def gather_thread(
                 
                 dest_slot_relidx = source_masks[mask_idx] 
                 
-                if dest_slot_relidx == -1: continue # Offset not present for this point
+                if dest_slot_relidx == (-1,-1): continue # Offset not present for this point
                 # This assert remains valid as offset_cumsum_pad is still indexed by off_idx
                 assert(0 <= off_idx < len(offset_cumsum_pad))
                 
                 # MODIFIED LOGIC FOR dest_slot_base:
                 # Assumes offset_cumsum_pad[off_idx] is the base *feature* address for this offset config's block,
                 # and dest_slot_relidx is the local *slot* index (0-indexed) of the point within this block.
-                dest_slot_base = (offset_cumsum_pad[off_idx] + dest_slot_relidx) * total_feats_per_pt
+                dest_slot_base = (offset_cumsum_pad[off_idx] + dest_slot_relidx[1]) * total_feats_per_pt
 
                 if tile_feat_size > 0:
 
@@ -409,11 +558,15 @@ if __name__ == '__main__':
     _src_masks_data = [-1]*(_num_pts * _n_offsets) # Placeholder for source masks
     # First offset has local indices for the first 4 points, rest are -1
     # Second offset has local indices for the last 4 points, rest are -1
-    _src_masks_data = [-1,-1,-1,-1,-1,-1,-1,-1, \
-                       0,1,2,3,-1,-1,-1,-1]                  
+    _src_masks_data = [(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1), \
+                       (0,0),(1,1),(2,2),(3,3),(-1,-1),(-1,-1),(-1,-1)]                  
     _offsets_cumsum = [0]*(_n_offsets+1) # Placeholder for cumulative offsets
 
-        # Populate the cumulative offsets based on the source masks
+    # Populate the cumulative offsets based on the source masks. 
+    # Converting to sparse offset representation.
+    # e.g., here only offset 1 has active slots for the first 4 points.
+    # We want to thus have [0].
+    
     for o in range(_n_offsets):
         # Count the number of active slots for this offset
         num_active_slots = sum(1 for i in _src_masks_data[o * _num_pts:(o + 1) * _num_pts] if i != -1)
@@ -421,8 +574,19 @@ if __name__ == '__main__':
     required_buffer_size = _offsets_cumsum[-1] # Total size needed for source_buffers
     
     _src_bufs_data = [0.0] * (required_buffer_size * _total_feats_pt + _total_feats_pt) # Add some padding
+    
+    _processed_offsets_cumsum = [_offsets_cumsum[0]]
+    for i in range(1, len(_offsets_cumsum)):
+        if _offsets_cumsum[i] != _offsets_cumsum[i-1]:
+            _processed_offsets_cumsum.append(_offsets_cumsum[i])
+    _offsets_cumsum = _processed_offsets_cumsum
 
-
+    # Remove 0d offsets from cumsum
+    # If neighbor and self offsets are same do not include 
+    # [0 0 4]. List as [0 4]
+    
+    
+    
     print(f"Starting Python threaded simulation with {_n_threads} threads...")
     print(f"Initial sum of source_buffers: {sum(_src_bufs_data)}")
 
@@ -442,3 +606,121 @@ if __name__ == '__main__':
     print("Python threaded simulation finished.")
     print(f"Final sum of source_buffers: {sum(_src_bufs_data)}")
     # Add more checks here if needed, e.g., print parts of the buffer.
+    
+    
+
+def scatter_thread(
+    log_tid: int,
+    num_threads: int,
+
+    # Original processing parameters (passed through)
+    num_points: int,
+    num_tiles_per_pt: int,
+    tile_feat_size: int,
+    bulk_feat_size: int,
+    offsets: list[int],           # same as in gather
+    offset_cumsum_pad: list[int], # same as in gather
+    source_masks: list[int],      # same as in gather
+    source_buffers: list[float],  # INPUT: what gather wrote
+    sources: list[float]          # OUTPUT: accumulate back here
+):
+    """
+    Reverse of gather: each thread reads from source_buffers and scatters
+    (accumulates) into 'sources' based on the same mapping metadata.
+    """
+    assert tile_feat_size > 0 and bulk_feat_size > 0
+    assert tile_feat_size % bulk_feat_size == 0
+
+    num_bulks_per_tile = tile_feat_size // bulk_feat_size
+    total_feats_per_pt = num_tiles_per_pt * tile_feat_size
+
+    # Each thread handles points in an interleaved fashion
+    for pt_idx in range(log_tid, num_points, num_threads):
+        pt_base = pt_idx * total_feats_per_pt
+
+        # Process each tile of this point
+        for tile_idx in range(num_tiles_per_pt):
+            # 1. LOAD PHASE: gather all contributions for this tile into tile_data
+            tile_data = [0.0] * tile_feat_size
+
+            for off_idx, off_key in enumerate(offsets):
+                mask_idx = off_key * num_points + pt_idx
+                assert 0 <= mask_idx < len(source_masks)
+
+                dest_slot_relidx = source_masks[mask_idx]
+                if dest_slot_relidx == -1:
+                    continue  # this offset doesn’t apply to this point
+
+                # Compute base address in source_buffers for this offset-block
+                slot_base = (offset_cumsum_pad[off_idx] + dest_slot_relidx) * total_feats_per_pt
+                tile_base_in_slot = tile_idx * tile_feat_size
+                first_bulk_in_slot = tile_base_in_slot // bulk_feat_size
+
+                # Pull in each bulk
+                for b in range(num_bulks_per_tile):
+                    bulk_idx = first_bulk_in_slot + b
+                    buf_addr = slot_base + bulk_idx * bulk_feat_size
+                    tile_buf_start = b * bulk_feat_size
+
+                    for e in range(bulk_feat_size):
+                        buf_idx = buf_addr + e
+                        data_idx = tile_buf_start + e
+                        assert 0 <= buf_idx < len(source_buffers)
+                        tile_data[data_idx] += source_buffers[buf_idx]
+
+            # 2. WRITEBACK PHASE: scatter tile_data back into sources[]
+            tile_base_in_pt = tile_idx * tile_feat_size
+            first_bulk_in_pt = tile_base_in_pt // bulk_feat_size
+
+            for b in range(num_bulks_per_tile):
+                bulk_idx = first_bulk_in_pt + b
+                dst_addr = pt_base + bulk_idx * bulk_feat_size
+                tile_buf_start = b * bulk_feat_size
+
+                for e in range(bulk_feat_size):
+                    dst_idx = dst_addr + e
+                    data_idx = tile_buf_start + e
+                    assert 0 <= dst_idx < len(sources)
+                    sources[dst_idx] += tile_data[data_idx]
+
+
+def python_threaded_scatter_simulation(
+    num_points: int,
+    num_tiles_per_pt: int,
+    tile_feat_size: int,
+    bulk_feat_size: int,
+    num_threads: int,
+    offsets: list[int],
+    offset_cumsum_pad: list[int],
+    source_masks: list[int],
+    source_buffers: list[float],
+    sources: list[float]
+) -> None:
+    """
+    Launches 'num_threads' scatter_thread workers, each accumulating
+    from source_buffers[] back into sources[].
+    """
+    if num_threads <= 0:
+        raise ValueError("num_threads must be > 0")
+    if any(x < 0 for x in (num_points, num_tiles_per_pt, tile_feat_size, bulk_feat_size)):
+        raise ValueError("num_points, num_tiles_per_pt, tile_feat_size, bulk_feat_size must be non-negative")
+    if tile_feat_size > 0 and tile_feat_size % bulk_feat_size != 0:
+        raise ValueError("tile_feat_size must be divisible by bulk_feat_size")
+
+    threads = []
+    for tid in range(num_threads):
+        t = threading.Thread(
+            target=scatter_thread,
+            args=(
+                tid, num_threads,
+                num_points, num_tiles_per_pt,
+                tile_feat_size, bulk_feat_size,
+                offsets, offset_cumsum_pad,
+                source_masks, source_buffers, sources
+            )
+        )
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()    
