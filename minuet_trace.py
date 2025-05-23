@@ -1,12 +1,17 @@
 from minuet_mapping import *
 from minuet_gather import *
 from minuet_config import *
+from read_pcl import *
 import os
 # ── Example Test with Phases ──
 if __name__ == '__main__':
     global phase
     # Input data
-    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
+    #in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
+    in_coords, _ = read_point_cloud("/Path/To/000000.bin")
+    
+    visualize_point_cloud(in_coords)
+
     stride = 1
     off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     # off_coords = [(0,1,-1)]
