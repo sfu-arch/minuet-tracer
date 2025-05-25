@@ -9,17 +9,31 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from minuet_config import *
 from minuet_gather import file_checksum
+from sorted_dict import SortedByValueLengthDict
+from sorted_dict import bidict
 curr_phase = None
 
-phases = {
+PHASES = bidict({
     'RDX': 0,
     'QRY': 1,
     'SRT': 2,
     'PVT': 3,
     'LKP': 4
-}
-tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'TILE': 7}
-ops = {'R': 0, 'W': 1}
+})
+TENSORS = bidict({
+    'I': 0,
+    'QK': 1,
+    'QI': 2,
+    'QO': 3,
+    'PIV': 4,
+    'KM': 5,
+    'WO': 6,
+    'TILE': 7
+})
+OPS = bidict({
+    'R': 0,
+    'W': 1
+})
 
 @dataclass
 class IndexedCoord:
@@ -38,24 +52,29 @@ class IndexedCoord:
 
 
 def addr_to_tensor(addr):
+    global curr_phase
+    print(curr_phase)
     """Convert address to tensor name."""
     if addr >= I_BASE and addr < QK_BASE:
-        return tensors['I']
+        return TENSORS['I']
     elif addr >= QK_BASE and addr < QI_BASE:
-        return tensors['QK']
+        return TENSORS['QK']
     elif addr >= QI_BASE and addr < QO_BASE:
-        return tensors['QI']
+        return TENSORS['QI']
     elif addr >= QO_BASE and addr < PIV_BASE:
-        return tensors['QO']
+        return TENSORS['QO']
     elif addr >= PIV_BASE and addr < KM_BASE:
-        return tensors['PIV']
+        return TENSORS['PIV']
     elif addr >= KM_BASE and addr < WO_BASE:
-        return tensors['KM']
+        return TENSORS['KM']
     elif addr >= WO_BASE and addr < WV_BASE:
-        return tensors['WO']
+        return TENSORS['WO']
     else:
+        assert(False), f"Unknown address: {addr}"
         return 'Unknown'
 
+
+    
 
 def write_gmem_trace(filename):
     """Write memory trace to a file in compressed integer format."""
@@ -108,15 +127,15 @@ def radix_sort_with_memtrace(arr, base):
         for i in range(N):
             # cycle thread IDs among NUM_THREADS
             t_id = (i % NUM_THREADS) 
-            record_access(t_id, ops['R'], base + i*SIZE_KEY)
+            record_access(t_id, OPS['R'], base + i*SIZE_KEY)
             _ = (arr[i] >> (p*8)) & mask
         # Phase: scatter
         for i in range(N):
             t_id = (i % NUM_THREADS) 
-            record_access(t_id, ops['R'], base + i*SIZE_KEY)
+            record_access(t_id, OPS['R'], base + i*SIZE_KEY)
             pos = i  # for illustration, stable mapping
             aux[pos] = arr[i]
-            record_access(t_id, ops['W'], base + pos*SIZE_KEY)
+            record_access(t_id, OPS['W'], base + pos*SIZE_KEY)
         # Swap buffers
         arr, aux = aux, arr
     return arr
@@ -124,7 +143,7 @@ def radix_sort_with_memtrace(arr, base):
 # ── Unique-Sort Inputs with Fixed Virtual Threads ──
 def compute_unique_sorted_coords(in_coords, stride):
     global curr_phase
-    curr_phase = phases['RDX']
+    curr_phase = PHASES['RDX']
 
     # Pack & write keys along with original indices
     idx_keys = []
@@ -162,7 +181,7 @@ def compute_unique_sorted_coords(in_coords, stride):
 # Build queries for the kernel map
 def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords):
     global curr_phase
-    curr_phase = phases['QRY']
+    curr_phase = PHASES['QRY']
     num_inputs = len(uniq_coords)
     num_offsets = len(off_coords)
     total_queries = num_inputs * num_offsets
@@ -203,7 +222,7 @@ def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords
 # Generate tiles and pivot keys for accelerating LKPs
 def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size: int = None):
     global curr_phase
-    curr_phase = phases['PVT']
+    curr_phase = PHASES['PVT']
 
     tiles, pivs = [], []
     if tile_size is None:
@@ -215,7 +234,7 @@ def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size: int = No
         tiles.append([item for item in tile_items])
         # Pivot is the key from the first IndexedCoord's Coord3D object
         pivs.append(tile_items[0].coord.to_key())
-        record_access(0, ops['W'], PIV_BASE + (len(pivs)-1)*SIZE_KEY)
+        record_access(0, OPS['W'], PIV_BASE + (len(pivs)-1)*SIZE_KEY)
     
     return tiles, pivs
 
@@ -223,10 +242,16 @@ def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size: int = No
 def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in_idx, 
                              qry_off_idx, wt_offsets, tiles: List[List[IndexedCoord]], pivs, tile_size):
     global curr_phase
-    curr_phase = phases['LKP']
-    # Initialize the kernel map for each offset
+    curr_phase = PHASES['LKP']
+    # Initialize the kernel map for each offset as a SortedByValueLengthDict
+    # This will automatically sort by length of values in descending order
     off_count = len(set(qry_off_idx))
-    kmap = {k: [] for k in range(off_count)}
+    kmap = SortedByValueLengthDict(ascending=False)
+    
+    # Initialize empty lists for each offset to avoid KeyError on first append
+    for k in range(off_count):
+        kmap[k] = []
+        
     qry_count = len(qry_keys)
     
     # Thread synchronization
@@ -255,14 +280,14 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
                 break  # Prevent going beyond array bounds
                 
             # Read query key
-            record_local(thread_id, ops['R'], QK_BASE + qry_idx*SIZE_KEY)            
-            qry_key_val = qry_keys[qry_idx].coord.to_key() # Renamed current_qry_key_int to qry_key_val
+            record_local(thread_id, OPS['R'], QK_BASE + qry_idx*SIZE_KEY)            
+            qry_key_val = qry_keys[qry_idx].coord.to_key()
             
             # Binary search on pivots
             low, high = 0, len(pivs)-1
             while low <= high:
                 mid = (low + high) // 2
-                record_local(thread_id, ops['R'], PIV_BASE + mid*SIZE_KEY)
+                record_local(thread_id, OPS['R'], PIV_BASE + mid*SIZE_KEY)
                 if pivs[mid] <= qry_key_val:
                     low = mid + 1
                 else:
@@ -277,31 +302,24 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
             base_offset = tile_idx * tile_size 
             
             # Linear scan through the tile (which contains IndexedCoord objects)
-            for j, tile_idxcoord in enumerate(tiles[tile_idx]): # Renamed tile_indexed_coord to tile_idxcoord
-                record_local(thread_id, ops['R'], TILE_BASE + (base_offset + j)*SIZE_KEY)
+            for j, tile_idxcoord in enumerate(tiles[tile_idx]):
+                record_local(thread_id, OPS['R'], TILE_BASE + (base_offset + j)*SIZE_KEY)
                 
-                tile_key_val = tile_idxcoord.coord.to_key() # Renamed key_from_tile_int to tile_key_val
+                tile_key_val = tile_idxcoord.coord.to_key()
                 
                 if tile_key_val == qry_key_val:
                     # Match found
-                    src_uniq_idx = qry_in_idx[qry_idx] # Renamed source_in_idx to src_uniq_idx
-                    curr_off_idx = qry_off_idx[qry_idx] # Renamed current_off_idx to curr_off_idx
+                    src_uniq_idx = qry_in_idx[qry_idx]
+                    curr_off_idx = qry_off_idx[qry_idx]
                     
-                    src_idxc = uniq_coords[src_uniq_idx] # Renamed source_indexed_coord to src_idxc
-                    src_coord_key = src_idxc.coord.to_key() # Renamed out_coord_key_int to src_coord_key
-                    query_src_orig_idx = qry_keys[qry_idx].orig_idx # Renamed output_original_idx to query_src_orig_idx
+                    query_src_orig_idx = qry_keys[qry_idx].orig_idx
+                    input_idx = tile_idxcoord.orig_idx
 
-
-                    # Add to kernel map with thread safety
+                    # Add to kernel map with thread safety - MODIFIED: only store (input_idx, query_src_orig_idx)
                     with kmap_lock:
-                        input_tpl = unpack32(tile_key_val) # Renamed in_coord_tuple to input_tpl
-                        input_idx = tile_idxcoord.orig_idx # Renamed input_original_idx to input_idx
-
-                        out_coord_tpl = unpack32(src_coord_key) # Renamed out_coord_tuple to out_coord_tpl
-
-                        kmap[curr_off_idx].append(((input_tpl, input_idx), 
-                                                      (out_coord_tpl, query_src_orig_idx)))
-                        record_local(thread_id, ops['W'], KM_BASE + curr_off_idx*SIZE_KEY)
+                            
+                        kmap[curr_off_idx].append((input_idx, query_src_orig_idx))
+                        record_local(thread_id, OPS['W'], KM_BASE + curr_off_idx*SIZE_KEY)
 
                     break
         
@@ -351,50 +369,37 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
         # Wait for all threads to complete processing this batch
         for thread in threads:
             thread.join()
+            
+    # Remove empty entries from kernel map
+    for off_idx in list(kmap.keys()):
+        if len(kmap[off_idx]) == 0:
+            del kmap[off_idx]
     return kmap
 
 
-def write_kernel_map_to_gz(kmap_data: Dict[int, List[Tuple[Tuple[Coord3D, int], Tuple[Coord3D, int]]]], filename: str, off_list: List[Tuple[int,int,int]]):
+def write_kernel_map_to_gz(kmap_data, filename: str, off_list: List[Tuple[int,int,int]]):
     """
     Write the kernel map to a gzipped binary file.
     Format:
     - num_total_entries (uint32_t)
     For each entry:
         - offset_idx (uint32_t)
-        - input_coord_key (uint32_t)  (packed target coordinate)
-        - input_coord_pos (uint32_t)  (original index of target coordinate)
-        - output_coord_key (uint32_t) (packed source coordinate)
-        - output_coord_pos (uint32_t) (original index of source coordinate)
+        - input_idx (uint32_t)  (original index of target coordinate)
+        - query_src_orig_idx (uint32_t) (original index of source coordinate)
     """
-    total_entries = sum(len(matches) for matches in kmap_data.values())
+    # Updated to work with both regular dict and SortedByValueLengthDict
+    total_entries = sum(len(entries) for entries in kmap_data.values())
     
     packed_entries = []
-    for off_idx, matches in kmap_data.items():
-        for match in matches:
-            # match is ((input_coord_tuple, input_original_idx), (output_coord_tuple, output_original_idx))
-            # input_coord_tuple is the target coordinate found
-            # output_coord_tuple is the source coordinate that, when offset, matched the target
+    for off_idx, entries in kmap_data.items():
+        for entry in entries:
+            # entry is (input_idx, query_src_orig_idx)
+            input_idx, query_src_orig_idx = entry
             
-            in_coord_data, out_coord_data = match
-            
-            in_xyz, in_pos = in_coord_data
-            out_xyz, out_pos = out_coord_data
-            
-            # Ensure input_xyz_tuple and output_xyz_tuple are indeed tuples (x,y,z)
-            # The kernel_map stores them as Coord3D objects if created from unpack32 which returns tuples,
-            # or if they were passed as Coord3D. Let's assume they are (x,y,z) tuples.
-            # If they are Coord3D objects, we'd use .to_key() or access .x, .y, .z
-            # Based on current kernel_map population:
-            # input_coord = unpack32(key) -> tuple
-            # output_coord = unpack32(unique_key) -> tuple
-            # So, input_xyz_tuple and output_xyz_tuple are (x,y,z) tuples.
-
-            in_key = pack32(in_xyz[0], in_xyz[1], in_xyz[2])
-            out_key = pack32(out_xyz[0], out_xyz[1], out_xyz[2])
             off_key = pack32(off_list[off_idx][0], off_list[off_idx][1], off_list[off_idx][2])
             
-            # Format: B (offset_idx), I (input_key), I (input_pos), I (output_key), I (output_pos)
-            packed_entry = struct.pack('IIIII', off_key, in_key, in_pos, out_key, out_pos)
+            # Format: I (offset_key), I (input_idx), I (query_src_orig_idx)
+            packed_entry = struct.pack('III', off_key, input_idx, query_src_orig_idx)
             packed_entries.append(packed_entry)
 
     # Verify total_entries matches len(packed_entries) in case of filtering
@@ -407,5 +412,4 @@ def write_kernel_map_to_gz(kmap_data: Dict[int, List[Tuple[Tuple[Coord3D, int], 
             
     print(f"Kernel map written to {filename}")
     print(f"Wrote {actual_entries} entries (expected {total_entries} before any filtering).")
-
 

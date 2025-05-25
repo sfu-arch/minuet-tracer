@@ -29,7 +29,7 @@ if __name__ == '__main__':
     )
 
     # Phase 3: Sort query keys (using existing sorted keys)
-    curr_phase = phases['SRT']
+    curr_phase = PHASES['SRT']
     print('--- Phase: Sort QKeys ---')
     # No sorting needed in this implementation
 
@@ -76,10 +76,10 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
+    
     map_trace_checksum = write_gmem_trace(output_dir+'map_trace.bin.gz')
     write_kernel_map_to_gz(kmap, output_dir+'kernel_map.bin.gz', off_coords)
 
-### End of minuet_mapping.py
     ########################################################################################################################################################
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
@@ -91,34 +91,22 @@ if __name__ == '__main__':
 #### - offsets_active is a sparse list of offsets that have atleast one match
 #### - slot_array is number of slots for each offset.
 
-    sorted_kmap = sorted(kmap.items(), key=lambda item: len(item[1]), reverse=True)
+    # No need to sort kmap as it's already a SortedByValueLengthDict
+    # Initialize offsets_active directly from keys of kmap (they're already sorted by match count)
+    offsets_active = list(kmap._get_sorted_keys())
     
+    # Initialize slot_array with lengths of match lists
+    slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
+    
+    debug = True
     if debug:
-        print(sorted_kmap)
+        print("Offsets sorted by matches count:", offsets_active)
+        print("Slot array:", slot_array)
 
-
-    # Count slot_array for allocation
-
-    # Create kernel map like this: (offset_idx, source_original_idx, target_original_idx)
-    # Example kmap entry for Offset 1: [(((target_coord_X, target_coord_Y, target_coord_Z), target_orig_idx=1), ((source_coord_X, source_coord_Y, source_coord_Z), source_orig_idx=2))]
-    # dict[offset, List[(src_idx, dst_idx)]]
-    idx_kmap = {}
-    for off_idx, matches in sorted_kmap:
-        for in_coord, out_coord in matches:
-            src_idx = in_coord[1]
-            dst_idx = out_coord[1]
-            if off_idx not in idx_kmap:
-                idx_kmap[off_idx] = []
-            idx_kmap[off_idx].append((src_idx, dst_idx))
-
-    # Determine how many slots are needed for each offset
-    slot_array, offsets_active = create_slot_array(idx_kmap)
- 
     # Perform greedy grouping and padding.
     from minuet_gather import greedy_group
-    print(idx_kmap)
     slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
-        idx_kmap,
+        kmap,  # Pass kmap directly as it's already in the right format
         offsets_active,
         slot_array,
         alignment=GEMM_ALIGNMENT,
@@ -128,7 +116,7 @@ if __name__ == '__main__':
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
 
     # Generate masks with global idx.
-    out_mask, in_mask,  = create_in_out_masks(idx_kmap, slot_dict, len(off_coords), len(uniq_coords))
+    out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")
@@ -221,6 +209,22 @@ if __name__ == '__main__':
 
     # print("\nSorted Kernel Map by Length of Matches:")
     # for off_idx, matches in sorted_kmap:
+    #     if matches:
+    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
+    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
+    #     if matches:
+    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
+    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
+    from minuet_gather import compact_bar_chart
+    compact_bar_chart(groups)
+
+
+
+    # print("\nSorted Kernel Map by Length of Matches:")
+    # for off_idx, matches in sorted_kmap:
+    #     if matches:
+    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
+    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
     #     if matches:
     #         print(f"  Offset {off_coords[off_idx]}: {matches}")
     # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")

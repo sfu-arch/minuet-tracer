@@ -7,34 +7,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
-
-# Reverse mappings (to convert integers back to strings)
-PHASES = {
-    0: 'Radix-Sort',
-    1: 'Build-Queries',
-    2: 'Sort-QKeys',
-    3: 'Tile-Pivots',
-    4: 'Lookup',
-    5: 'Lookup-Backward',
-    6: 'Lookup-Forward',
-    7: 'Dedup'
-}
-
-TENSORS = {
-    0: 'I',    # Input keys
-    1: 'QK',   # Query keys
-    2: 'QI',   # Query input-index array
-    3: 'QO',   # Query offset-index array
-    4: 'PIV',  # Tile pivot keys
-    5: 'KM',   # Kernel-map writes
-    6: 'WO',   # Weight-offset keys
-    7: 'WV'    # Weight values
-}
-
-OPS = {
-    0: 'R',    # Read
-    1: 'W'     # Write
-}
+from minuet_mapping import PHASES, OPS, TENSORS
 
 def read_trace(filename):
     """Read a compressed memory trace file and return the entries."""
@@ -50,12 +23,10 @@ def read_trace(filename):
             for _ in range(num_entries):
                 entry = struct.unpack('BBBBI', f.read(8))  # Format is BBBBI
                 phase_id, thread_id, op_id, tensor_id, addr = entry
-                
-                # Convert numeric IDs to strings
-                phase = PHASES.get(phase_id, f"Unknown-{phase_id}")
-                op = OPS.get(op_id, f"Unknown-{op_id}")
-                tensor = TENSORS.get(tensor_id, f"Unknown-{tensor_id}")
-                print(phase_id)
+                                # Convert numeric IDs to strings
+                phase = PHASES.inverse[phase_id][0] if phase_id in PHASES.inverse else f"Unknown-{phase_id}"
+                op = OPS.inverse[op_id][0] if op_id in OPS.inverse else f"Unknown-{op_id}"
+                tensor = TENSORS.inverse[tensor_id][0] if tensor_id in TENSORS.inverse else f"Unknown-{tensor_id}"
                 entries.append({
                     'phase': phase,
                     'thread_id': thread_id,
@@ -63,7 +34,6 @@ def read_trace(filename):
                     'tensor': tensor,
                     'addr': addr
                 })
-                
         return entries
     
     except Exception as e:
@@ -78,8 +48,8 @@ def analyze_trace(entries):
     
     # Count operations by phase
     phase_ops = defaultdict(lambda: {'R': 0, 'W': 0})
-    for entry in entries:
-        print(entry['phase'])
+    for entry in entries:  
+        print(entry['phase'], entry['op'])
         phase_ops[entry['phase']][entry['op']] += 1
     
     # Count operations by tensor
@@ -152,7 +122,7 @@ def plot_memory_access_patterns(entries, output_file=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Read and analyze minuet memory trace files')
-    parser.add_argument('--trace_file', help='Path to memory trace file')
+    parser.add_argument('--trace-file', help='Path to memory trace file')
     parser.add_argument('--filter-phase', help='Filter by phase name')
     parser.add_argument('--filter-op', choices=['R', 'W'], help='Filter by operation type')
     parser.add_argument('--filter-tensor', help='Filter by tensor type')

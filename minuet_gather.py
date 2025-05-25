@@ -25,10 +25,12 @@ def file_checksum(filename):
 import numpy as np
 from typing import Sequence, Any, Mapping
 
-def create_slot_array(kernel_map):
+def create_slot_array(sorted_kmap_idx, kernel_map):
     slot_array = np.zeros(len(kernel_map.keys()), dtype=np.int32)
     offsets_active = []
-    for i, (o, matches) in enumerate(kernel_map.items()):
+    for i in sorted_kmap_idx:
+        o = i
+        matches = kernel_map[o]
         if len(matches) > 0:
             slot_array[i] = len(matches)
             offsets_active.append(o)
