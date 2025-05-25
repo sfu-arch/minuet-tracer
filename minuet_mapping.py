@@ -8,17 +8,15 @@ from coord import pack32, unpack32, unpack32s, Coord3D
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from minuet_config import *
-
+from minuet_gather import file_checksum
 curr_phase = None
 
 phases = {
-    'Radix-Sort': 0,
-    'Build-Queries': 1,
-    'Sort-QKeys': 2,
-    'Tile-Pivots': 3,
-    'Lookup': 4,
-    "Lookup-Backward": 5,
-    "Lookup-Forward": 6,
+    'RDX': 0,
+    'QRY': 1,
+    'SRT': 2,
+    'PVT': 3,
+    'LKP': 4
 }
 tensors = {'I': 0, 'QK': 1, 'QI': 2, 'QO': 3, 'PIV': 4, 'KM': 5, 'WO': 6, 'TILE': 7}
 ops = {'R': 0, 'W': 1}
@@ -42,19 +40,19 @@ class IndexedCoord:
 def addr_to_tensor(addr):
     """Convert address to tensor name."""
     if addr >= I_BASE and addr < QK_BASE:
-        return 'I'
+        return tensors['I']
     elif addr >= QK_BASE and addr < QI_BASE:
-        return 'QK'
+        return tensors['QK']
     elif addr >= QI_BASE and addr < QO_BASE:
-        return 'QI'
+        return tensors['QI']
     elif addr >= QO_BASE and addr < PIV_BASE:
-        return 'QO'
+        return tensors['QO']
     elif addr >= PIV_BASE and addr < KM_BASE:
-        return 'PIV'
+        return tensors['PIV']
     elif addr >= KM_BASE and addr < WO_BASE:
-        return 'KM'
+        return tensors['KM']
     elif addr >= WO_BASE and addr < WV_BASE:
-        return 'WO'
+        return tensors['WO']
     else:
         return 'Unknown'
 
@@ -67,14 +65,10 @@ def write_gmem_trace(filename):
     # Create compressed trace
     comp_trace = []
     for entry in mem_trace:
-        phase, thread_id, op, tensor, addr = entry
-        phase_id = phases[phase]
-        # print(phase_id)
-        # Convert address from hex string to integer
-        addr_int = int(addr, 16)
+        phase_id, thread_id, op, tensor, addr = entry
         
         # Create compressed entry (all integers)
-        comp_entry = (phase_id, thread_id, ops[op], tensors[tensor], addr_int)
+        comp_entry = (phase_id, thread_id, op, tensor, addr)
         comp_trace.append(comp_entry)
     
     # Write to binary file for maximum compression
@@ -84,17 +78,21 @@ def write_gmem_trace(filename):
         
         # Write each entry as packed integers (BBBBI format)
         for entry in comp_trace:
+            # print(entry)
             f.write(struct.pack('BBBBI', *entry))
     
     print(f"Memory trace written to {filename}")
     print(f"Compressed {len(mem_trace)} entries")
+    
+    checksum = file_checksum(filename)
+    return checksum
     # print(f"Phase mapping: {phase_map}")
 
 
 def record_access(thread_id, op, addr):
     """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
     tensor = addr_to_tensor(addr)
-    entry = (curr_phase, thread_id, op, tensor, hex(addr))
+    entry = (curr_phase, thread_id, op, tensor, addr)
     mem_trace.append(entry)
 
 
@@ -110,15 +108,15 @@ def radix_sort_with_memtrace(arr, base):
         for i in range(N):
             # cycle thread IDs among NUM_THREADS
             t_id = (i % NUM_THREADS) 
-            record_access(t_id, 'R', base + i*SIZE_KEY)
+            record_access(t_id, ops['R'], base + i*SIZE_KEY)
             _ = (arr[i] >> (p*8)) & mask
         # Phase: scatter
         for i in range(N):
             t_id = (i % NUM_THREADS) 
-            record_access(t_id, 'R', base + i*SIZE_KEY)
+            record_access(t_id, ops['R'], base + i*SIZE_KEY)
             pos = i  # for illustration, stable mapping
             aux[pos] = arr[i]
-            record_access(t_id, 'W', base + pos*SIZE_KEY)
+            record_access(t_id, ops['W'], base + pos*SIZE_KEY)
         # Swap buffers
         arr, aux = aux, arr
     return arr
@@ -126,8 +124,8 @@ def radix_sort_with_memtrace(arr, base):
 # ── Unique-Sort Inputs with Fixed Virtual Threads ──
 def compute_unique_sorted_coords(in_coords, stride):
     global curr_phase
-    curr_phase = 'Radix-Sort'
-    
+    curr_phase = phases['RDX']
+
     # Pack & write keys along with original indices
     idx_keys = []
     for idx, (x, y, z) in enumerate(in_coords):
@@ -157,14 +155,14 @@ def compute_unique_sorted_coords(in_coords, stride):
         print("Sorted+Unique Keys with Original Indices:")
         for idx, idxc_item in enumerate(uniq_coords): # Renamed idxc_item to idxc_item
             coord = idxc_item.coord # Renamed c to coord
-            print(f"key={hex(coord.to_key())}, coords=({coord.x}, {coord.y}, {coord.z}), original_input_index={idxc_item.orig_idx}")
-    
+            print(f"key={coord.to_key()}, coords=({coord.x}, {coord.y}, {coord.z}), original_input_index={idxc_item.orig_idx}")
+
     return uniq_coords
 
 # Build queries for the kernel map
 def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords):
     global curr_phase
-    curr_phase = 'Build-Queries'
+    curr_phase = phases['QRY']
     num_inputs = len(uniq_coords)
     num_offsets = len(off_coords)
     total_queries = num_inputs * num_offsets
@@ -202,10 +200,10 @@ def build_coordinate_queries(uniq_coords: List[IndexedCoord], stride, off_coords
     
     return qry_keys, qry_in_idx, qry_off_idx, wt_offsets
 
-# Generate tiles and pivot keys for accelerating lookups
+# Generate tiles and pivot keys for accelerating LKPs
 def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size: int = None):
     global curr_phase
-    curr_phase = 'Tile-Pivots'
+    curr_phase = phases['PVT']
 
     tiles, pivs = [], []
     if tile_size is None:
@@ -217,15 +215,15 @@ def create_tiles_and_pivots(uniq_coords: List[IndexedCoord], tile_size: int = No
         tiles.append([item for item in tile_items])
         # Pivot is the key from the first IndexedCoord's Coord3D object
         pivs.append(tile_items[0].coord.to_key())
-        record_access(0, 'W', PIV_BASE + (len(pivs)-1)*SIZE_KEY)
+        record_access(0, ops['W'], PIV_BASE + (len(pivs)-1)*SIZE_KEY)
     
     return tiles, pivs
 
-# Lookup phase - main query processing
+# LKP phase - main query processing
 def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in_idx, 
                              qry_off_idx, wt_offsets, tiles: List[List[IndexedCoord]], pivs, tile_size):
     global curr_phase
-    curr_phase = 'Lookup'
+    curr_phase = phases['LKP']
     # Initialize the kernel map for each offset
     off_count = len(set(qry_off_idx))
     kmap = {k: [] for k in range(off_count)}
@@ -245,7 +243,7 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
             t_local.local_trace = []
             
         tensor = addr_to_tensor(addr)
-        entry = (curr_phase, thread_id, op, tensor, hex(addr))
+        entry = (curr_phase, thread_id, op, tensor, addr)
         t_local.local_trace.append(entry)
     
     # Worker function for parallel execution of a portion of a batch
@@ -257,14 +255,14 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
                 break  # Prevent going beyond array bounds
                 
             # Read query key
-            record_local(thread_id, 'R', QK_BASE + qry_idx*SIZE_KEY)            
+            record_local(thread_id, ops['R'], QK_BASE + qry_idx*SIZE_KEY)            
             qry_key_val = qry_keys[qry_idx].coord.to_key() # Renamed current_qry_key_int to qry_key_val
             
             # Binary search on pivots
             low, high = 0, len(pivs)-1
             while low <= high:
                 mid = (low + high) // 2
-                record_local(thread_id, 'R', PIV_BASE + mid*SIZE_KEY)
+                record_local(thread_id, ops['R'], PIV_BASE + mid*SIZE_KEY)
                 if pivs[mid] <= qry_key_val:
                     low = mid + 1
                 else:
@@ -280,7 +278,7 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
             
             # Linear scan through the tile (which contains IndexedCoord objects)
             for j, tile_idxcoord in enumerate(tiles[tile_idx]): # Renamed tile_indexed_coord to tile_idxcoord
-                record_local(thread_id, 'R', TILE_BASE + (base_offset + j)*SIZE_KEY)
+                record_local(thread_id, ops['R'], TILE_BASE + (base_offset + j)*SIZE_KEY)
                 
                 tile_key_val = tile_idxcoord.coord.to_key() # Renamed key_from_tile_int to tile_key_val
                 
@@ -303,8 +301,8 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
 
                         kmap[curr_off_idx].append(((input_tpl, input_idx), 
                                                       (out_coord_tpl, query_src_orig_idx)))
-                        record_local(thread_id, 'W', KM_BASE + curr_off_idx*SIZE_KEY)
-                    
+                        record_local(thread_id, ops['W'], KM_BASE + curr_off_idx*SIZE_KEY)
+
                     break
         
         # Transfer thread-local trace to global trace

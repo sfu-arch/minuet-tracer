@@ -152,7 +152,7 @@ def plot_memory_access_patterns(entries, output_file=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Read and analyze minuet memory trace files')
-    parser.add_argument('trace_file', help='Path to memory trace file')
+    parser.add_argument('--trace_file', help='Path to memory trace file')
     parser.add_argument('--filter-phase', help='Filter by phase name')
     parser.add_argument('--filter-op', choices=['R', 'W'], help='Filter by operation type')
     parser.add_argument('--filter-tensor', help='Filter by tensor type')

@@ -24,6 +24,15 @@ GEMM_ALIGNMENT = 4
 GEMM_WT_GROUP = 2
 GEMM_SIZE = 4
 
+
+# GATHER PARAMETERS
+NUM_TILES = 4 
+TILE_FEATS = 16 
+BULK_FEATS = 4  
+N_THREADS = 1  
+TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS
+
+
 # Feature vectors (64-bit address space)
 IV_BASE = 0x100000000 # Input feature vectors
 WV_BASE = 0xF00000000 # Weight values

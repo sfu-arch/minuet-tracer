@@ -21,55 +21,56 @@ def file_checksum(filename):
             chunk = f.read(4096)
     return hash_lib.hexdigest()
 
-    
 
-def create_in_out_masks(kernel_map, num_offsets, num_sources, num_targets):
+import numpy as np
+from typing import Sequence, Any, Mapping
+
+def create_slot_array(kernel_map):
+    slot_array = np.zeros(len(kernel_map.keys()), dtype=np.int32)
+    offsets_active = []
+    for i, (o, matches) in enumerate(kernel_map.items()):
+        if len(matches) > 0:
+            slot_array[i] = len(matches)
+            offsets_active.append(o)
+    return slot_array, offsets_active
+
+
+
+
+def create_in_out_masks(kernel_map, slot_dict, num_offsets, num_sources):
     """
     Args:
-      kernel_map   : dict[int, List[tuple[int, int]]]
+      kernel_map   : List[tuple[int, int]]
                      Each key 'o' (offset) maps to a list of (in_idx, out_idx) tuples.
                      Note: The original docstring type hint for matches was more complex.
                      This implementation assumes 'matches' is List[(in_idx, out_idx)]
                      based on the loop structure `for local_i, (in_idx,out_idx) in enumerate(matches):`.
       num_offsets  : total number of offsets (O)
       num_sources  : total number of source points (N_in)
-      num_targets  : total number of target points (N_out)
-
+  
     Returns:
-      out_mask     : Dict[tuple[int,int]] of length (match_offsets * matches)
-      in_mask      : Dict[tuple[int,int]] of length (match_offsets * matches)
-      offsets_active: List[int] of offsets 'o' that have matches, sorted by 'o'.
-      slot_array    : List[int] cumulative sum of match counts for active offsets.
-                      slot_array[0] = 0, slot_array[i] = sum of lengths for first i active offsets.
+      out_mask     : List[int]  of length (match_offsets * matches)
+      in_mask      : List[int] of length (match_offsets * matches)
+      cumsum       : Cumulative sum of counts for allocating slots
     """ 
     # initialize both to -1
-    out_mask = { }
-    in_mask = {  }
     
-    # Helper function to process a single item (o, matches_list) from kernel_map
-    # This function will be executed by each thread.
-    # It modifies in_mask and out_mask in-place. This is safe because:
-    # 1. Python's GIL ensures that individual list item assignments are atomic.
-    # 2. Each 'o' is unique for a given call from the main loop, ensuring that
-    #    threads write to distinct, non-overlapping sections of in_mask and out_mask.
+    in_mask = np.full(num_offsets*num_sources, -1, dtype=np.int32)
+    out_mask = np.full(num_offsets*num_sources, -1, dtype=np.int32)
     def _process_kernel_item(item_tuple):
-        o, matches_list = item_tuple
-        in_mask[o] = []
-        out_mask[o] = []        
+        o, matches_list = item_tuple 
         # Based on the original loop: for local_i, (in_idx, out_idx) in enumerate(matches_list):
         # item_in_idx is used with num_targets for in_mask.
         # item_out_idx is used with num_sources for out_mask.
-        for local_i, (item_in_idx, item_out_idx) in enumerate(matches_list):
+        for local_i, (in_idx, out_idx) in enumerate(matches_list):
             # Update in_mask (related to targets)
-            in_mask_actual_idx = o * num_targets + item_in_idx
-            in_mask[o].append((local_i, item_in_idx))
+            in_mask_actual_idx = o * num_sources + in_idx
+            in_mask[in_mask_actual_idx] =  slot_dict[o] + local_i  
             # Update out_mask (related to sources)
-            out_mask_actual_idx = o * num_sources + item_out_idx
-            out_mask[o].append((local_i, item_out_idx))
+            out_mask_actual_idx = o * num_sources + out_idx
+            out_mask[out_mask_actual_idx] = slot_dict[o] + local_i
 
-        if len(matches_list) > 0:
-            return (o, len(matches_list)) # Return offset and its count of matches
-        return None # Indicates no active matches for this offset
+        return out_mask, in_mask
 
     processed_results = []
     # Use ThreadPoolExecutor to parallelize the processing of kernel_map items.
@@ -79,84 +80,42 @@ def create_in_out_masks(kernel_map, num_offsets, num_sources, num_targets):
         # kernel_map.items() yields (offset, matches_list) tuples.
         futures = [executor.submit(_process_kernel_item, item) for item in kernel_map.items()]
         
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result() # result is (o, len_matches) or None
-            if result is not None:
-                processed_results.append(result)
-    
-    # Sort results by offset 'o'. This ensures that offsets_active and
-    # the corresponding slot_array_lengths are in a deterministic, sorted order.
-    processed_results.sort(key=lambda x: x[0])
-
-    # Construct slot_array_lengths (non-cumulative) and offsets_active from sorted results
-    slot_array_lengths = []
-    offsets_active = []
-    if processed_results: # Avoid errors if processed_results is empty
-        for o_val, length_val in processed_results:
-            offsets_active.append(o_val)
-            slot_array_lengths.append(length_val)
-            
-    # Compute the cumulative sum for slot_array.
-    # The final slot_array[0] will be 0.
-    # slot_array[i] will be the sum of lengths for the first i active_offsets.
-    final_cumulative_slot_array = [0] * (len(slot_array_lengths) + 1)
-    current_sum = 0
-    for i, length in enumerate(slot_array_lengths):
-        current_sum += length
-        final_cumulative_slot_array[i+1] = current_sum
-    checksum = write_metadata(out_mask, in_mask, offsets_active, final_cumulative_slot_array)
-    
-    return out_mask, in_mask, offsets_active, final_cumulative_slot_array, checksum
+    return out_mask, in_mask
 
 
-def write_metadata(out_mask, in_mask, offsets_active, slot_array, filename=output_dir+'metadata.bin.gz'):
+def write_metadata(out_mask, in_mask, slot_dict, slot_array, num_offsets, num_sources, total_slots, filename=output_dir+'metadata.bin.gz'):
     """
     Write the metadata to a gzipped binary file.
     
     Format:
     - Magic number "MINU" + version (uint32)
     - Number of active offsets (uint32)
-    - Number of slots (uint32)
-    - For each active offset:
-      - Offset value (uint32)
-      - Number of out_mask entries for this offset (uint32)
-      - Number of in_mask entries for this offset (uint32)
-      - For each out_mask entry:
-        - local_idx (uint32)
-        - point_idx (uint32)
-      - For each in_mask entry:
-        - local_idx (uint32)
-        - point_idx (uint32)
-    - Slot array values (list of uint32)
+    - slot_dict offset: base address in global slot array (uint32)
+    - slot_array: cumulative sum of counts for each array
+    - Number of sources (uint32)
+    - Numpy array of out_mask (uint32) and in_mask (uint32)
     """
     with gzip.open(filename, 'wb') as f:
         # Write magic number ("MINU") and version (1)
-        f.write(struct.pack('!4sI', b'MINU', 1))
-        
-        # Write number of active offsets and slots
-        f.write(struct.pack('!II', len(offsets_active), len(slot_array)))
-        
-        # Write each active offset and its mask data
-        for offset in offsets_active:
-            # Get out_mask and in_mask entries for this offset
-            out_entries = out_mask.get(offset, [])
-            in_entries = in_mask.get(offset, [])
-            
-            # Write offset value and entry counts
-            f.write(struct.pack('!III', offset, len(out_entries), len(in_entries)))
-            
-            # Write out_mask entries
-            for local_idx, point_idx in out_entries:
-                f.write(struct.pack('!II', local_idx, point_idx))
-            
-            # Write in_mask entries
-            for local_idx, point_idx in in_entries:
-                f.write(struct.pack('!II', local_idx, point_idx))
-        
-        # Write slot array values
-        for value in slot_array:
-            f.write(struct.pack('!I', value))
-            
+        f.write(struct.pack('4sI', b'MINU', 1))
+
+        # Write number of offsets and sources
+        f.write(struct.pack('II', num_offsets, num_sources))
+
+        # Write total slots allocated for gemm buffer
+        f.write(struct.pack('I', total_slots))
+
+        # Write number of active offsets
+        f.write(struct.pack('I', len(slot_dict)))
+
+        # Write each active offset, base address and actual size (without padding, with padding)
+        for i, (offset, addr) in enumerate(slot_dict.items()):     # Write offset value and entry counts
+            f.write(struct.pack('III', offset, addr, slot_array[i]))        
+       
+        # Write masks
+        f.write(out_mask.tobytes())
+        f.write(in_mask.tobytes())
+    
     checksum = file_checksum(filename)
     return checksum
 
@@ -447,24 +406,23 @@ def greedy_group(idx_kmap, offsets_active, slots, alignment=4, max_group=6, max_
 
     # build membership lists
     membership = [members for members, _, _, _ in groups]
-
-
+    # Calcualate total slots
+    total_slots = sum(g[3] for g in groups)
+ 
     gemm_list = []
     for g in groups:
             gemm_list.append({
             'num_offsets': g[0][1]-g[0][0]+1,
             'gemm_M': g[3],
-            'gemm_N': g[0][1]-g[0][0]+1,
-            'offsets': [[offsets_active[i]] for i in range(g[0][0], g[0][1]+1)], # Corrected to use offsets_active
-            'inputs': tuple(pair[0] for i in range(g[0][0], g[0][1]+1) for pair in idx_kmap.get(offsets_active[i], [])),
-            'outs': tuple(pair[1] for i in range(g[0][0], g[0][1]+1) for pair in idx_kmap.get(offsets_active[i], [])), # Corrected similarly for 'outs'
+            'slots': g[2],
             'padding': g[3]-g[2]
         })
             
+    print(gemm_list)
     # Write out the gemm list to file.
     checksum = write_gemm_list(gemm_list)
 
-    return pos_indices, groups, membership, gemm_list, checksum
+    return pos_indices, groups, membership, gemm_list, total_slots, checksum
 
 
 def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
@@ -488,43 +446,11 @@ def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
             gemm_M = gemm['gemm_M']
             # gemm['gemm_N'] is the same as num_offsets, so it's implicitly covered
             padding = gemm['padding']
-            
-            inputs_tuple = gemm['inputs']
-            outs_tuple = gemm['outs']
-            
-            len_inputs = len(inputs_tuple)
-            len_outs = len(outs_tuple)
-
-            # Pack header: num_offsets, gemm_M, padding, len_inputs, len_outs
-            # Using network byte order '!' for consistency, 'I' for 4-byte unsigned int.
-            header_format = '!IIIII' 
-            packed_header = struct.pack(header_format, 
+            packed_header = struct.pack("!III", 
                                         num_offsets, 
                                         gemm_M, 
-                                        padding, 
-                                        len_inputs, 
-                                        len_outs)
+                                        padding)
             f.write(packed_header)
-
-            # Pack offsets data
-            # gemm['offsets'] is a list of single-element lists, e.g., [[val1], [val2], ...]
-            if num_offsets > 0:
-                offsets_format = '!' + 'I' * num_offsets
-                actual_offsets = [item[0] for item in gemm['offsets']]
-                packed_offsets = struct.pack(offsets_format, *actual_offsets)
-                f.write(packed_offsets)
-
-            # Pack inputs data
-            if len_inputs > 0:
-                inputs_format = '!' + 'I' * len_inputs
-                packed_inputs = struct.pack(inputs_format, *inputs_tuple)
-                f.write(packed_inputs)
-
-            # Pack outs data
-            if len_outs > 0:
-                outs_format = '!' + 'I' * len_outs
-                packed_outs = struct.pack(outs_format, *outs_tuple)
-                f.write(packed_outs)
     checksum = file_checksum(filename)
     return checksum
 
@@ -561,35 +487,6 @@ def read_gemm_list(filename):
                 'outs': ()
             }
 
-            # Read offsets data
-            if num_offsets > 0:
-                offsets_format = '!' + 'I' * num_offsets
-                offsets_size = struct.calcsize(offsets_format)
-                packed_offsets = f.read(offsets_size)
-                if len(packed_offsets) < offsets_size:
-                    raise EOFError("Incomplete offsets data. File might be corrupted.")
-                unpacked_offsets = struct.unpack(offsets_format, packed_offsets)
-                # Store offsets in the same format as originally: list of single-element lists
-                gemm_entry['offsets'] = [[val] for val in unpacked_offsets]
-
-            # Read inputs data
-            if len_inputs > 0:
-                inputs_format = '!' + 'I' * len_inputs
-                inputs_size = struct.calcsize(inputs_format)
-                packed_inputs = f.read(inputs_size)
-                if len(packed_inputs) < inputs_size:
-                    raise EOFError("Incomplete inputs data. File might be corrupted.")
-                gemm_entry['inputs'] = struct.unpack(inputs_format, packed_inputs)
-            
-            # Read outs data
-            if len_outs > 0:
-                outs_format = '!' + 'I' * len_outs
-                outs_size = struct.calcsize(outs_format)
-                packed_outs = f.read(outs_size)
-                if len(packed_outs) < outs_size:
-                    raise EOFError("Incomplete outs data. File might be corrupted.")
-                gemm_entry['outs'] = struct.unpack(outs_format, packed_outs)
-            
             gemm_data_list.append(gemm_entry)
             
     return gemm_data_list
