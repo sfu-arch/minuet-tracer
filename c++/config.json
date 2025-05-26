@@ -15,10 +15,11 @@
   "GEMM_ALIGNMENT": 4,
   "GEMM_WT_GROUP": 2,
   "GEMM_SIZE": 4,
-  "NUM_TILES": 2,
+  "NUM_TILES": 4,
   "TILE_FEATS": 16,
   "BULK_FEATS": 4,
   "N_THREADS_GATHER": 1,
   "debug": false,
+  "NUM_PIVOTS": 2,
   "output_dir": "out/"
 }

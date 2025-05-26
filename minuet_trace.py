@@ -35,7 +35,7 @@ if __name__ == '__main__':
 
     # Phase 4: Create tiles and pivots for lookup optimization
     print('--- Phase: Make Tiles & Pivots ---')
-    coord_tiles, pivs = create_tiles_and_pivots(uniq_coords, 2) # Renamed c_tiles to coord_tiles
+    coord_tiles, pivs = create_tiles_and_pivots(uniq_coords, NUM_PIVOTS) # Renamed c_tiles to coord_tiles
     
     # Phase 5: Perform coordinate lookup
     print('--- Phase: Lookup ---')

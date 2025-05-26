@@ -58,20 +58,20 @@ uint32_t pack32(int c1, int c2, int c3) {
   // Packs three 10-bit integer coordinates into a single 30-bit key within a
   // uint32_t. c1: bits 20-29, c2: bits 10-19, c3: bits 0-9
   uint32_t key = 0;
-  key = (key << 10) | (static_cast<uint32_t>(c1) & 0x3FF);
-  key = (key << 10) | (static_cast<uint32_t>(c2) & 0x3FF);
   key = (key << 10) | (static_cast<uint32_t>(c3) & 0x3FF);
+  key = (key << 10) | (static_cast<uint32_t>(c2) & 0x3FF);
+  key = (key << 10) | (static_cast<uint32_t>(c1) & 0x3FF);
   return key;
 }
 
 std::tuple<int, int, int> unpack32(uint32_t key) {
   // Unpacks a 30-bit key (stored in uint32_t) into three 10-bit integer
   // coordinates. Assumes c3 is LSB, c1 is MSB of the 30-bit value.
-  int c3 = static_cast<int>(key & 0x3FF);
+  int c1 = static_cast<int>(key & 0x3FF);
   key >>= 10;
   int c2 = static_cast<int>(key & 0x3FF);
   key >>= 10;
-  int c1 = static_cast<int>(key & 0x3FF);
+  int c3 = static_cast<int>(key & 0x3FF);
   return std::make_tuple(c1, c2, c3);
 }
 
@@ -81,16 +81,16 @@ std::tuple<int, int, int> unpack32s(uint32_t key) {
   // Subtract 1024 (0x400).
   uint32_t temp_key = key;
 
-  int c3_val = static_cast<int>(temp_key & 0x3FF);
-  c3_val = (c3_val < 512) ? c3_val : c3_val - 1024;
+  int c1_val = static_cast<int>(temp_key & 0x3FF);
+  c1_val = (c1_val < 512) ? c1_val : c1_val - 1024;
   temp_key >>= 10;
 
   int c2_val = static_cast<int>(temp_key & 0x3FF);
   c2_val = (c2_val < 512) ? c2_val : c2_val - 1024;
   temp_key >>= 10;
 
-  int c1_val = static_cast<int>(temp_key & 0x3FF);
-  c1_val = (c1_val < 512) ? c1_val : c1_val - 1024;
+  int c3_val = static_cast<int>(temp_key & 0x3FF);
+  c3_val = (c3_val < 512) ? c3_val : c3_val - 1024;
 
   return std::make_tuple(c1_val, c2_val, c3_val);
 }

@@ -123,7 +123,7 @@ def main():
 
     # --- Phase 4: Tile and Pivot Generation ---
     print(f"--- Phase: {'PVT'} (PVT) ---")
-    tiles_pivots_data_cpp = minuet_cpp.create_tiles_and_pivots(unique_indexed_coords_cpp, cpp_global_config.NUM_TILES) # Use config
+    tiles_pivots_data_cpp = minuet_cpp.create_tiles_and_pivots(unique_indexed_coords_cpp, cpp_global_config.NUM_PIVOTS) # Use config
 
     # --- Phase 5: Lookup ---
     print(f"--- Phase: {'LKP'} (LKP) ---")
