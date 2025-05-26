@@ -218,49 +218,68 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
           py::arg("kmap_data"), py::arg("filename"), py::arg("off_list"),
           "Writes the kernel map to a gzipped file and returns its CRC32 checksum.");
 
+    // --- Bindings for Greedy Grouping (from minuet_gather.hpp / minuet_trace.cpp) ---
+
+    py::class_<GemmInfo>(m, "GemmInfo")
+        .def(py::init<>())
+        .def_readwrite("num_offsets", &GemmInfo::num_offsets)
+        .def_readwrite("gemm_M", &GemmInfo::gemm_M)
+        .def_readwrite("slots", &GemmInfo::slots)
+        .def_readwrite("padding", &GemmInfo::padding)
+        .def("__repr__", [](const GemmInfo &gi) {
+            return "<GemmInfo num_offsets=" + std::to_string(gi.num_offsets) +
+                   ", gemm_M=" + std::to_string(gi.gemm_M) +
+                   ", slots=" + std::to_string(gi.slots) +
+                   ", padding=" + std::to_string(gi.padding) + ">";
+        });
+
+    py::class_<GroupInfo>(m, "GroupInfo")
+        .def(py::init<>())
+        .def_readwrite("members", &GroupInfo::members)
+        .def_readwrite("base_addr", &GroupInfo::base_addr)
+        .def_readwrite("required_slots", &GroupInfo::required_slots)
+        .def_readwrite("allocated_slots", &GroupInfo::allocated_slots)
+        .def("__repr__", [](const GroupInfo &gi) {
+            std::string members_str = "[";
+            for (size_t i = 0; i < gi.members.size(); ++i) {
+                members_str += std::to_string(gi.members[i]) + (i < gi.members.size() - 1 ? ", " : "");
+            }
+            members_str += "]";
+            return "<GroupInfo members=" + members_str +
+                   ", base_addr=" + std::to_string(gi.base_addr) +
+                   ", required_slots=" + std::to_string(gi.required_slots) +
+                   ", allocated_slots=" + std::to_string(gi.allocated_slots) + ">";
+        });
+
+    py::class_<GreedyGroupResult>(m, "GreedyGroupResult")
+        .def(py::init<>())
+        .def_readwrite("pos_indices", &GreedyGroupResult::pos_indices)
+        .def_readwrite("groups", &GreedyGroupResult::groups)
+        .def_readwrite("membership", &GreedyGroupResult::membership)
+        .def_readwrite("gemm_list", &GreedyGroupResult::gemm_list)
+        .def_readwrite("total_slots_allocated", &GreedyGroupResult::total_slots_allocated)
+        .def_readwrite("checksum", &GreedyGroupResult::checksum)
+        .def("__repr__", [](const GreedyGroupResult &ggr) {
+            return "<GreedyGroupResult groups_count=" + std::to_string(ggr.groups.size()) +
+                   ", gemm_list_count=" + std::to_string(ggr.gemm_list.size()) +
+                   ", total_slots_allocated=" + std::to_string(ggr.total_slots_allocated) +
+                   ", checksum=" + std::to_string(ggr.checksum) + ">";
+        });
+
+    m.def("greedy_group_cpp", &greedy_group_cpp,
+          py::arg("slots"),
+          py::arg("alignment") = 4,
+          py::arg("max_group_items") = 6,
+          py::arg("max_raw_slots") = -1, // -1 for None
+          "Performs greedy grouping of slots, similar to Python's greedy_group.");
+
+    // Bind write_gemm_list_cpp separately if direct access is desired from Python
+    // This is already called by greedy_group_cpp, but can be exposed for flexibility/testing.
+    m.def("write_gemm_list_cpp", &write_gemm_list_cpp,
+        py::arg("gemm_data_list"), py::arg("filename"),
+        "Writes a list of GemmInfo to a gzipped file and returns its CRC32 checksum.");
+
+
     // // Bind Minuet Gather Structs
-    // py::class_<GroupInfo>(m, "GroupInfo")
-    //     .def(py::init<>())
-    //     .def_readwrite("member_indices", &GroupInfo::member_indices) // Corrected field name
-    //     .def_readwrite("base_addr", &GroupInfo::base_addr)
-    //     .def_readwrite("required_slots", &GroupInfo::required_slots)
-    //     .def_readwrite("allocated_slots", &GroupInfo::allocated_slots);
-
-    // py::class_<GemmEntry>(m, "GemmEntry")
-    //     .def(py::init<>())
-    //     .def_readwrite("num_offsets", &GemmEntry::num_offsets)
-    //     .def_readwrite("gemm_M", &GemmEntry::gemm_M)
-    //     .def_readwrite("len_inputs", &GemmEntry::len_inputs)
-    //     .def_readwrite("len_outputs", &GemmEntry::len_outputs)
-    //     .def_readwrite("padding", &GemmEntry::padding)
-    //     .def_readwrite("offsets_data_indices", &GemmEntry::offsets_data_indices) // Field name in C++ struct
-    //     .def_readwrite("inputs_data_indices", &GemmEntry::inputs_data_indices)   // Field name in C++ struct
-    //     .def_readwrite("outputs_data_indices", &GemmEntry::outputs_data_indices); // Field name in C++ struct
-
-    // // Bind Minuet Gather Functions
-    // // Ensure argument names in lambda match C++ function for clarity, though not strictly necessary for pybind
-    // m.def("create_slot_array_cpp", &create_slot_array_cpp,
-    //       py::arg("kernel_map"));
-
-    // // Binding for create_in_out_masks_cpp
-    // // The C++ function returns std::pair<std::vector<int>, std::vector<int>>
-    // // pybind11 automatically converts this to a Python tuple of lists.
-    // m.def("create_in_out_masks_cpp", &create_in_out_masks_cpp,
-    //       py::arg("kernel_map"), 
-    //       py::arg("slot_dict"), // This is std::map<uint32_t, int> in C++
-    //       py::arg("num_total_offsets"), 
-    //       py::arg("num_total_sources"));
-
-    // // Binding for greedy_group_cpp
-    // // The C++ function returns std::tuple<std::vector<int>, std::vector<GroupInfo>, std::vector<GemmEntry>, int, uint32_t>
-    // // pybind11 automatically converts this to a Python tuple.
-    // // The last argument max_slots_opt is std::optional<int>. Pybind11 handles optional automatically.
-    // m.def("greedy_group_cpp", &greedy_group_cpp,
-    //       py::arg("idx_kmap"), // This is KernelMapType in C++
-    //       py::arg("offsets_active"), // std::vector<uint32_t>
-    //       py::arg("slots"), // std::vector<int>
-    //       py::arg("alignment"), 
-    //       py::arg("max_group"), 
-    //       py::arg("max_slots_opt") = std::nullopt); // Provide default for optional
 
 }

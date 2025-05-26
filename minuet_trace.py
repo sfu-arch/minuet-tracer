@@ -106,8 +106,6 @@ if __name__ == '__main__':
     # Perform greedy grouping and padding.
     from minuet_gather import greedy_group
     slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
-        kmap,  # Pass kmap directly as it's already in the right format
-        offsets_active,
         slot_array,
         alignment=GEMM_ALIGNMENT,
         max_group=GEMM_WT_GROUP,

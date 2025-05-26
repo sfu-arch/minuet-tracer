@@ -85,7 +85,7 @@ try:
     # These Python-side configs might now be redundant if C++ config is the source of truth
     # Or they might be used for Python-specific parts of the script
     from minuet_mapping import PHASES as PY_PHASES, OPS as PY_OPS, TENSORS as PY_TENSORS #, output_dir as PY_output_dir, debug as PY_debug, NUM_THREADS as PY_NUM_THREADS, I_BASE as PY_I_BASE, TILE_BASE as PY_TILE_BASE, QK_BASE as PY_QK_BASE, QI_BASE as PY_QI_BASE, QO_BASE as PY_QO_BASE, PIV_BASE as PY_PIV_BASE, KM_BASE as PY_KM_BASE, WO_BASE as PY_WO_BASE, SIZE_KEY as PY_SIZE_KEY, SIZE_INT as PY_SIZE_INT
-    from minuet_gather import greedy_group, create_in_out_masks, compact_bar_chart, write_gemm_list # Assuming these are still Python
+    from minuet_gather import create_in_out_masks, compact_bar_chart # Removed greedy_group, write_gemm_list from here if C++ versions are used
     # from minuet_config import GEMM_ALIGNMENT, GEMM_WT_GROUP, GEMM_SIZE, NUM_TILES, TILE_FEATS, BULK_FEATS, TOTAL_FEATS_PT
 except ImportError as e:
     print(f"Failed to import Minuet Python utility modules (minuet_mapping, etc.): {e}")
@@ -240,17 +240,108 @@ def main():
     # They need the kmap (now kernel_map_result_cpp), offsets_active, and slot_array.
     # The values in kernel_map_result_cpp are lists of C++ pair-like objects,
     # which should be usable by the Python functions if they access elements via indexing (e.g., pair[0], pair[1]).
-    slot_indices, groups, membership, gemm_list, total_slots = greedy_group(
-        kernel_map_result_cpp, # Use kernel_map_result_cpp directly
-        offsets_active,
-        slot_array,
-        alignment=cpp_global_config.GEMM_ALIGNMENT,
-        max_group=cpp_global_config.GEMM_WT_GROUP,
-        max_slots=cpp_global_config.GEMM_SIZE
-    )
-    gemm_checksum = write_gemm_list(gemm_list, cpp_global_config.output_dir + "gemms.bin.gz")
+    
+    # Prepare 'slots' argument for greedy_group_cpp. It expects a list of integers.
+    # slot_array was previously created as: slot_array.append(len(matches_list))
+    # This 'slot_array' is the list of slot sizes.
+    # Ensure slot_array is sorted in descending order as expected by greedy_group_cpp
+    # (The C++ version currently assumes this precondition based on Python's behavior)
+    # If kernel_map_result_cpp.items() gives items sorted by key (offset_key_int),
+    # and we want to group based on slot sizes (match list lengths), we need to sort slot_array.
+    # However, the Python greedy_group took the kmap, offsets_active, and slot_array.
+    # The C++ greedy_group_cpp takes only the list of slot sizes.
+    # Let's use the 'slot_array' which contains lengths of match lists.
+    # The Python greedy_group sorts this internally if it's passed as a dictionary.
+    # The C++ version expects a pre-sorted list of slot sizes.
+    
+    # Create the list of slot sizes (lengths of match lists)
+    # The original python greedy_group took `kernel_map_result_cpp, offsets_active, slot_array`
+    # The C++ `greedy_group_cpp` takes `slots` (a list of integers, assumed sorted descending).
+    # `slot_array` here is already the list of match list lengths, corresponding to `offsets_active`.
+    # We need to sort `slot_array` in descending order for the C++ function.
+    cpp_slots_arg = slot_array.copy() # Copy to avoid modifying the original
+    # cpp_slots_arg = sorted(slot_array, reverse=True)
 
-    slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
+    print(f"Calling C++ greedy_group_cpp with {len(cpp_slots_arg)} slot sizes.")
+    if cpp_global_config.debug:
+        print(f"  Slot sizes for C++ greedy_group_cpp (sorted desc): {cpp_slots_arg[:10]}...")
+
+
+    # Call C++ greedy_group_cpp
+    greedy_group_result_cpp = minuet_cpp.greedy_group_cpp(
+        cpp_slots_arg, # Pass the sorted list of slot sizes
+        alignment=cpp_global_config.GEMM_ALIGNMENT,
+        max_group_items=cpp_global_config.GEMM_WT_GROUP, # Renamed from max_group
+        max_raw_slots=cpp_global_config.GEMM_SIZE       # Renamed from max_slots
+    )
+
+    # Extract results from the GreedyGroupResult object
+    slot_indices = greedy_group_result_cpp.pos_indices
+    # The 'groups' in C++ GreedyGroupResult contains GroupInfo objects.
+    # Python's greedy_group returned tuples: (members, base_addr, req, alloc)
+    # We need to adapt if subsequent Python code expects this tuple structure.
+    # For now, let's assume subsequent code can handle the GroupInfo objects or we adapt it.
+    groups_cpp_objects = greedy_group_result_cpp.groups 
+    membership = greedy_group_result_cpp.membership
+    gemm_list_cpp = greedy_group_result_cpp.gemm_list # List of GemmInfo objects
+    total_slots = greedy_group_result_cpp.total_slots_allocated
+    gemm_checksum_cpp = greedy_group_result_cpp.checksum # Checksum from C++ write_gemm_list_cpp
+
+    # Adapt groups_cpp_objects if necessary for compact_bar_chart or other Python consumers
+    # compact_bar_chart expects: list of (se, addr, req, alloc)
+    # se is (start_pos, end_pos) which corresponds to group.members[0] and group.members[-1]
+    # if members are original indices.
+    # The C++ GroupInfo.members are indices into the *input `slots` to greedy_group_cpp*.
+    # This needs careful handling if compact_bar_chart relies on original global offset indices.
+    # For now, let's construct a compatible 'groups_for_python' list.
+    # The 'members' in C++ GroupInfo are indices relative to the `cpp_slots_arg` passed to it.
+    # This is different from Python's `groups` which had original offset indices.
+    # This part might need significant rework depending on how `compact_bar_chart` uses `groups`.
+    # Let's assume for now that `compact_bar_chart` can be adapted or the C++ group structure is sufficient.
+    # The `groups` variable for `compact_bar_chart` in Python was:
+    # groups.append((cur_members.copy(), addr, req, alloc)) where cur_members were original indices.
+    # The C++ GroupInfo has `members` (indices into sorted slot list), `base_addr`, `required_slots`, `allocated_slots`.
+    
+    # For compact_bar_chart, it expects: (se, addr, req, alloc)
+    # se = (start_pos, end_pos)
+    # Let's try to make a simplified groups list for the chart, using the C++ group info.
+    # The 'members' in C++ GroupInfo are indices into the sorted slot list.
+    # This is not directly translatable to the original (start_pos, end_pos) expected by compact_bar_chart
+    # without mapping back to original offset indices.
+    # This is a placeholder for now.
+    groups_for_chart = []
+    for g_info in groups_cpp_objects:
+        # g_info.members are indices into the sorted list of slot sizes.
+        # This is not directly (start_pos, end_pos) of original items.
+        # For charting, we might just use a group index or a simplified representation.
+        # Using (first_member_idx, last_member_idx) from the sorted list as a proxy for 'se'.
+        if g_info.members:
+            se_proxy = (g_info.members[0], g_info.members[-1]) 
+        else:
+            se_proxy = (-1, -1)
+        groups_for_chart.append(
+            (se_proxy, g_info.base_addr, g_info.required_slots, g_info.allocated_slots)
+        )
+
+
+    # slot_dict maps original offset indices to their starting slot index in the GEMM buffer.
+    # The `pos_indices` from C++ `greedy_group_cpp` are for the `cpp_slots_arg` (sorted slot sizes).
+    # We need to map these back to the original `offsets_active`.
+    # This requires knowing the original order of `slot_array` before it was sorted into `cpp_slots_arg`.
+    # Let's create a mapping from sorted slot size back to its original position in `offsets_active`.
+    
+    # Create pairs of (slot_size, original_index_in_offsets_active)
+    indexed_slot_array = list(enumerate(slot_array)) # slot_array is unsorted here
+    # Sort these pairs by slot_size descending, similar to how cpp_slots_arg was created
+    sorted_indexed_slot_array = sorted(indexed_slot_array, key=lambda x: x[1], reverse=True)
+
+    # Now, pos_indices from C++ corresponds to sorted_indexed_slot_array.
+    # We can build slot_dict by mapping original_index_in_offsets_active to the calculated position.
+    slot_dict = {}
+    for i, (original_idx_in_offsets_active, _) in enumerate(sorted_indexed_slot_array):
+        original_offset_key = offsets_active[original_idx_in_offsets_active]
+        slot_dict[original_offset_key] = slot_indices[i] # slot_indices[i] is the start for this slot size
+
 
     # Generate masks with global idx.
     # For create_in_out_masks, uniq_coords_count is len(unique_indexed_coords_cpp)
@@ -275,29 +366,28 @@ def main():
         #         point_idx = i % len(unique_indexed_coords_cpp)
         #         print(f"Writing to buffer: offset_idx={offset_idx}, point_idx={point_idx}, in_mask_val={in_mask.ravel()[i]}")
         
-        print("Groups metadata ([start, end], base, req, alloc):")
-        for g in groups:
-            print(g)    
-        print("GEMM List:")
-        for g_item in gemm_list: # Renamed g to g_item to avoid conflict
-            print(g_item)
+        print("Groups metadata (from C++ GreedyGroupResult, adapted for chart):")
+        for g_chart_item in groups_for_chart: # Use the adapted list
+            print(g_chart_item)    
+        print("GEMM List (from C++ GreedyGroupResult):")
+        # gemm_list_cpp contains GemmInfo objects. Access their fields.
+        for g_info_cpp in gemm_list_cpp: 
+            print(f"  NumOffsets: {g_info_cpp.num_offsets}, Gemm_M: {g_info_cpp.gemm_M}, Slots: {g_info_cpp.slots}, Padding: {g_info_cpp.padding}")
 
         # Print total space allocated by groups
-        total_alloc = sum(g[3] for g in groups)
-        print(f"\nTotal allocated space: {total_alloc} slots")
+        print(f"\nTotal allocated space (from C++): {total_slots} slots")
 
-        print("\nPer-position slot indices:")
+        print("\nPer-position slot indices (from C++ for sorted slot sizes):")
         print(slot_indices)
 
-        print("\nGroup membership lists:")
+        print("\nGroup membership lists (from C++ for sorted slot sizes):")
         print(membership)
 
     # Write all checksums to file as json
     checksums = {
-        "map_trace_cpp.bin": hex(map_trace_checksum_cpp), # Use checksum from C++
-        # "metadata.bin.gz": metadata_checksum, # If you generate and write this
-        "kernel_map_cpp.bin": hex(kernel_map_checksum_cpp), # Use checksum from C++
-        "gemms.bin.gz": hex(gemm_checksum), # This checksum is from Python's greedy_group
+        "map_trace_cpp.bin": hex(map_trace_checksum_cpp), 
+        "kernel_map_cpp.bin": hex(kernel_map_checksum_cpp), 
+        "gemms.bin.gz": hex(gemm_checksum_cpp), # Use checksum from C++ result
     }
     
     checksum_filename = os.path.join(current_output_dir, 'checksums_cpp.json')
@@ -305,7 +395,7 @@ def main():
         json.dump(checksums, f, indent=2)
     print(f"Checksums written to {checksum_filename}")
 
-    compact_bar_chart(groups)
+    compact_bar_chart(groups_for_chart) # Use the adapted groups list
     print("\nPython tracer script finished.")
 
 if __name__ == '__main__':

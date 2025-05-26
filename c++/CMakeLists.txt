@@ -18,6 +18,7 @@ pybind11_add_module(minuet_cpp_module
     src/minuet_bindings.cpp # Add the new bindings file
     src/minuet_config.cpp   # Add the config source file
     src/coord.cpp # Add the coord source file
+    src/minuet_gather.cpp # Add the gather source file
 )
 
 # Specify include directories
@@ -45,6 +46,7 @@ add_executable(minuet_trace_cpp
     src/minuet_trace.cpp
     src/minuet_config.cpp
     src/coord.cpp
+    src/minuet_gather.cpp   
 )
 target_include_directories(minuet_trace_cpp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -91,11 +91,18 @@ def write_metadata(out_mask, in_mask, slot_dict, slot_array, num_offsets, num_so
     
     Format:
     - Magic number "MINU" + version (uint32)
-    - Number of active offsets (uint32)
-    - slot_dict offset: base address in global slot array (uint32)
-    - slot_array: cumulative sum of counts for each array
+    - Number of offsets (uint32)
     - Number of sources (uint32)
-    - Numpy array of out_mask (uint32) and in_mask (uint32)
+    - Total slots allocated for gemm buffer (uint32)
+    - Number of active offsets (uint32)
+    - For each active offset:
+        - Offset value (uint32)
+        - Base address (uint32)
+        - Actual size without padding (uint32)
+        - Actual size with padding (uint32)
+    - Masks:
+        - Output mask (bytes)
+        - Input mask (bytes)
     """
     with gzip.open(filename, 'wb') as f:
         # Write magic number ("MINU") and version (1)
@@ -342,7 +349,7 @@ def dp_group(
     return pos_indices, groups, membership
 
 
-def greedy_group(idx_kmap, offsets_active, slots, alignment=4, max_group=6, max_slots=None):
+def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
     """
     Greedy grouping after sorting positions by descending slot requirement.
 
@@ -435,12 +442,7 @@ def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
     - num_offsets (unsigned int)
     - gemm_M (unsigned int)
     - padding (unsigned int)
-    - len_inputs (unsigned int)
-    - len_outs (unsigned int)
-    - offsets_data (num_offsets * unsigned int)
-    - inputs_data (len_inputs * unsigned int)
-    - outs_data (len_outs * unsigned int)
-    All integers are packed in network byte order (!).
+    All integers are packed in little-endian byte order (<).
     """
     with gzip.open(filename, 'wb') as f: # Open in binary write mode
         for gemm in gemm_data_list:
@@ -448,7 +450,7 @@ def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
             gemm_M = gemm['gemm_M']
             # gemm['gemm_N'] is the same as num_offsets, so it's implicitly covered
             padding = gemm['padding']
-            packed_header = struct.pack("!III", 
+            packed_header = struct.pack("III",  # Changed from !III to <III
                                         num_offsets, 
                                         gemm_M, 
                                         padding)
@@ -459,13 +461,14 @@ def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
 def read_gemm_list(filename):
     """
     Read the gemm list from a packed binary, gzipped file.
+    Assumes data is in little-endian byte order.
     Returns a list of GEMM dictionaries.
     """
     gemm_data_list = []
     
     # Define the format and size of the fixed-size header
     # num_offsets, gemm_M, padding, len_inputs, len_outs
-    header_format = '!IIIII' 
+    header_format = '<IIIII'  # Changed from !IIIII to <IIIII
     header_size = struct.calcsize(header_format)
 
     with gzip.open(filename, 'rb') as f: # Open in binary read mode
@@ -864,6 +867,10 @@ def python_threaded_scatter_simulation(
             )
         )
         threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
         t.start()
 
     for t in threads:

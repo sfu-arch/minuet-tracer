@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
+#include <numeric> // For std::accumulate
 
 // --- Global Variable Definitions ---
 std::vector<MemoryAccessEntry> mem_trace; // Updated name
@@ -647,3 +648,26 @@ uint32_t write_kernel_map_to_gz(
 
             return static_cast<uint32_t>(crc);
 }
+
+// --- New Structs and Functions for Greedy Grouping ---
+
+// Helper to convert host uint32_t to big-endian network byte order
+// uint32_t hton_u32(uint32_t val) { // DEFINITION REMOVED
+//     return htonl(val);
+// }
+
+// DEFINITIONS for GemmInfo, GroupInfo, GreedyGroupResult structs are in minuet_gather.hpp (declarations)
+// Their definitions (if they were more than just structs, e.g. with methods) or the functions below are moved.
+
+// uint32_t write_gemm_list_cpp(const std::vector<GemmInfo>& gemm_data_list, const std::string& filename) { // DEFINITION REMOVED
+// ...implementation moved to minuet_gather.cpp...
+// }
+
+// GreedyGroupResult greedy_group_cpp( // DEFINITION REMOVED
+//     const std::vector<int>& slots,
+//     int alignment,
+//     int max_group_items,
+//     int max_raw_slots
+// ) {
+// ...implementation moved to minuet_gather.cpp...
+// }
