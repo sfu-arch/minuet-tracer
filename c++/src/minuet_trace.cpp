@@ -417,7 +417,7 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
   return result;
 }
 
-KernelMap perform_coordinate_lookup( // Renamed from lookup
+KernelMapType perform_coordinate_lookup( // Renamed from lookup
     const std::vector<IndexedCoord> &uniq_coords,
     const std::vector<IndexedCoord> &qry_keys,
     const std::vector<int> &qry_in_idx, const std::vector<int> &qry_off_idx,
@@ -425,7 +425,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
     const std::vector<std::vector<IndexedCoord>> &tiles,
     const std::vector<IndexedCoord> &pivs, int tile_size_param) {
   curr_phase = PHASES.inverse.at(4); // "LKP"
-  KernelMap kmap;
+  KernelMapType kmap(false); // false for descending order (longest match list first)
   uint64_t kmap_write_idx = 0; // Local counter for KM writes, like Python
 
   if (uniq_coords.empty() || qry_keys.empty()) {
@@ -550,7 +550,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
 }
 
 void write_kernel_map_to_gz(
-    const KernelMap &kmap_data, const std::string &filename,
+    const KernelMapType &kmap_data, const std::string &filename,
     const std::vector<Coord3D>
         &off_list 
 ) {
@@ -573,7 +573,12 @@ void write_kernel_map_to_gz(
   }
 
   // Iterate through the map (sorted by offset_idx due to std::map)
-  for (const auto &pair : kmap_data) {
+  // For SortedByValueSizeMap, we need to get the items in its sorted order if that's desired for writing.
+  // However, the Python version writes based on iterating kmap.items(), which for a standard dict
+  // is insertion order (or arbitrary in older Pythons). For SortedByValueLengthDict, it's value-length order.
+  // The C++ std::map iterates by key. If we want to write in value-size-sorted order:
+  auto sorted_items = kmap_data.get_sorted_items();
+  for (const auto &pair : sorted_items) { // Iterate sorted items
     uint32_t offset_idx = pair.first; // This is the integer index for off_list
 
     if (offset_idx >= off_list.size()) {

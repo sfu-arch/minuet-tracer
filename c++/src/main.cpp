@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     // Python: curr_phase = PHASES['LKP']
     // C++: curr_phase is set within perform_coordinate_lookup
     std::cout << "--- Phase: " << PHASES.inverse.at(4) << " ---" << std::endl;
-    KernelMap kernel_map_result = perform_coordinate_lookup(
+    KernelMapType kernel_map_result = perform_coordinate_lookup(
         unique_indexed_coords, query_data.qry_keys, query_data.qry_in_idx, 
         query_data.qry_off_idx, query_data.wt_offsets, // wt_offsets from query_data
         tiles_pivots_data.tiles, tiles_pivots_data.pivots, g_config.NUM_PIVOTS // tile_size = 2
@@ -179,6 +179,35 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "\nC++ Minuet mapping trace generation complete." << std::endl;
+
+    // --- Start of Gather Logic Integration ---
+    std::cout << "\n--- Minuet Gather (C++) ---" << std::endl;
+
+    // 1. Prepare offsets_active and slots (mimicking Python's minuet_gather.py logic)
+    std::vector<std::pair<int, size_t>> offset_counts; // pair: {offset_idx, count}
+    // Iterate using get_sorted_items() to respect the SortedByValueSizeMap order if needed here
+    // or iterate the underlying map if key order is preferred for this step.
+    // For preparing offsets_active_cpp and slots_cpp, Python sorts kmap by len(matches) descending.
+    // Our KernelMapType is already sorted this way (if initialized with ascending=false).
+    auto sorted_kmap_items = kernel_map_result.get_sorted_items();
+    for(const auto& entry : sorted_kmap_items) {
+        offset_counts.push_back({entry.first, entry.second.size()});
+    }
+    // The sorting done in Python: offsets_active = list(kmap._get_sorted_keys())
+    // slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
+    // Our KernelMapType(false) should already provide keys in descending order of value size.
+
+    std::vector<int> offsets_active_cpp;
+    std::vector<int> slots_cpp; // slot counts for offsets_active_cpp
+    // We iterate through sorted_kmap_items which is already sorted by match count (descending)
+    for(const auto& oc_pair : sorted_kmap_items) { // oc_pair is std::pair<const Key, ValueContainer>
+        if (!oc_pair.second.empty()) { // Only consider offsets with actual matches
+            offsets_active_cpp.push_back(oc_pair.first);
+            slots_cpp.push_back(oc_pair.second.size());
+        }
+    }
+
+    // ... existing gather logic continues ...
 
     return 0;
 }

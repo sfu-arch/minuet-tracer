@@ -3,8 +3,22 @@
 #include <pybind11/operators.h> // For operator overloading
 #include "minuet_trace.hpp"     // Your main header
 #include "minuet_config.hpp"    // Include the config header for g_config
+#include "minuet_gather.hpp"    // Include the gather header
 
 namespace py = pybind11;
+
+// Helper to bind KernelMapType (SortedByValueSizeMap) to a Python dict-like object
+// This allows Python to treat it somewhat like a dictionary, though true
+// dict behavior (e.g., direct item assignment from Python) is complex to replicate fully.
+// For now, we expose it as an opaque type or provide specific accessors.
+// Since pybind11/stl.h handles std::map well, and our SortedByValueSizeMap wraps one,
+// we might not need a custom binding if we just expose its contents or specific methods.
+// However, if we want Python to see it as a dict sorted by value size, that's more involved.
+
+// For now, let KernelMapType be handled by pybind11's default STL conversions
+// where possible, or expose specific methods like get_sorted_items().
+// If direct dict-like access is needed from Python, a custom type caster
+// or a wrapper class in C++ exposed to Python would be required.
 
 PYBIND11_MODULE(minuet_cpp_module, m) {
     m.doc() = "Pybind11 bindings for Minuet C++ trace and mapping functions";
@@ -74,8 +88,60 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
         .def_readwrite("tiles", &TilesPivotsResult::tiles)
         .def_readwrite("pivots", &TilesPivotsResult::pivots);
 
-    // Bind KernelMap (std::map<uint32_t, std::vector<std::pair<int, int>>>)
-    // Pybind11 handles stl containers automatically with pybind11/stl.h
+    // Bind KernelMapType (SortedByValueSizeMap<uint32_t, std::vector<std::pair<int, int>>>)
+    // Expose it as an opaque type for now, or bind specific methods if needed.
+    // py::bind_map<KernelMapType>(m, "KernelMap"); // This won't work directly for custom types
+    // Instead, let's expose it as a class and bind methods to access its data if Python needs to inspect it.
+    // For functions that return KernelMapType, pybind11 will try to convert if possible.
+    // If it's just passed around, it might work as an opaque type.
+    // Given its usage, Python side likely needs to iterate it or look up items.
+    // A simple way is to provide a method that converts it to a Python dictionary.
+    py::class_<KernelMapType>(m, "KernelMap") // Keep Python name "KernelMap" for consistency
+        .def(py::init<bool>(), py::arg("ascending") = true)
+        .def("get_sorted_items", [](const KernelMapType &kmap) {
+            // Convert to a Python list of tuples (key, value_list_of_pairs)
+            py::list items;
+            auto sorted_cpp_items = kmap.get_sorted_items();
+            for (const auto& cpp_item : sorted_cpp_items) {
+                // cpp_item is std::pair<const uint32_t, std::vector<std::pair<int, int>>>
+                py::list val_list;
+                for (const auto& p : cpp_item.second) {
+                    val_list.append(py::make_tuple(p.first, p.second));
+                }
+                items.append(py::make_tuple(cpp_item.first, val_list));
+            }
+            return items;
+        })
+        .def("__getitem__", [](const KernelMapType &kmap, uint32_t key) {
+            // This provides kmap[key] access from Python (read-only)
+            try {
+                const auto& val_vec = kmap.at(key);
+                py::list val_list;
+                for (const auto& p : val_vec) {
+                    val_list.append(py::make_tuple(p.first, p.second));
+                }
+                return val_list;
+            } catch (const std::out_of_range& e) {
+                throw py::key_error("key not found");
+            }
+        })
+        .def("__contains__", [](const KernelMapType &kmap, uint32_t key) {
+            return kmap.count(key) > 0;
+        })
+        .def("__len__", &KernelMapType::size)
+        .def("empty", &KernelMapType::empty)
+        .def("items", [](const KernelMapType &kmap) { // Mimics dict.items() based on sorted order
+            py::list items_list;
+            auto sorted_cpp_items = kmap.get_sorted_items();
+            for (const auto& cpp_item : sorted_cpp_items) {
+                py::list val_list;
+                for (const auto& p : cpp_item.second) {
+                    val_list.append(py::make_tuple(p.first, p.second));
+                }
+                items_list.append(py::make_tuple(cpp_item.first, val_list));
+            }
+            return items_list;
+        });
 
     // Bind global state accessors
     m.def("get_mem_trace", &get_mem_trace, py::return_value_policy::reference_internal); // Or copy
@@ -114,6 +180,7 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
         .def_property_readonly("GEMM_WT_GROUP", [](const MinuetConfig& c){ return c.GEMM_WT_GROUP; })
         .def_property_readonly("GEMM_SIZE", [](const MinuetConfig& c){ return c.GEMM_SIZE; })
         .def_property_readonly("NUM_TILES", [](const MinuetConfig& c){ return c.NUM_TILES; })
+        .def_property_readonly("NUM_PIVOTS", [](const MinuetConfig& c){ return c.NUM_PIVOTS; })
         .def_property_readonly("TILE_FEATS", [](const MinuetConfig& c){ return c.TILE_FEATS; })
         .def_property_readonly("BULK_FEATS", [](const MinuetConfig& c){ return c.BULK_FEATS; })
         .def_property_readonly("N_THREADS_GATHER", [](const MinuetConfig& c){ return c.N_THREADS_GATHER; })
@@ -143,37 +210,55 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     m.def("perform_coordinate_lookup", &perform_coordinate_lookup,
           py::arg("uniq_coords"), py::arg("qry_keys"), py::arg("qry_in_idx"),
           py::arg("qry_off_idx"), py::arg("wt_offsets"), py::arg("tiles"),
-          py::arg("pivs"), py::arg("tile_size"));
+          py::arg("pivs"), py::arg("tile_size"),
+          py::return_value_policy::move); // KernelMapType is returned by value
 
     m.def("write_kernel_map_to_gz", &write_kernel_map_to_gz,
           py::arg("kmap_data"), py::arg("filename"), py::arg("off_list"));
 
-    // Expose constants - These are now superseded by get_global_config()
-    // m.attr("NUM_THREADS") = py::int_(NUM_THREADS);
-    // m.attr("I_BASE") = py::int_(I_BASE);
-    // m.attr("TILE_BASE") = py::int_(TILE_BASE);
-    // m.attr("QK_BASE") = py::int_(QK_BASE);
-    // m.attr("QI_BASE") = py::int_(QI_BASE);
-    // m.attr("QO_BASE") = py::int_(QO_BASE);
-    // m.attr("PIV_BASE") = py::int_(PIV_BASE);
-    // m.attr("KM_BASE") = py::int_(KM_BASE);
-    // m.attr("WO_BASE") = py::int_(WO_BASE);
-    // m.attr("SIZE_KEY") = py::int_(SIZE_KEY);
-    // m.attr("SIZE_INT") = py::int_(SIZE_INT);
+    // // Bind Minuet Gather Structs
+    // py::class_<GroupInfo>(m, "GroupInfo")
+    //     .def(py::init<>())
+    //     .def_readwrite("member_indices", &GroupInfo::member_indices) // Corrected field name
+    //     .def_readwrite("base_addr", &GroupInfo::base_addr)
+    //     .def_readwrite("required_slots", &GroupInfo::required_slots)
+    //     .def_readwrite("allocated_slots", &GroupInfo::allocated_slots);
 
-    // Expose PHASES, TENSORS, OPS (forward maps)
-    m.attr("PHASES") = PHASES.forward;
-    m.attr("TENSORS") = TENSORS.forward;
-    m.attr("OPS") = OPS.forward;
-    
-    // Utility pack/unpack functions
-    m.def("pack32", &pack32, py::arg("c1"), py::arg("c2"), py::arg("c3"));
-    m.def("unpack32", [](uint32_t key) {
-        auto [c1, c2, c3] = unpack32(key);
-        return std::make_tuple(c1, c2, c3);
-    }, py::arg("key"));
-    m.def("unpack32s", [](uint32_t key) {
-        auto [c1, c2, c3] = unpack32s(key);
-        return std::make_tuple(c1, c2, c3);
-    }, py::arg("key"));
+    // py::class_<GemmEntry>(m, "GemmEntry")
+    //     .def(py::init<>())
+    //     .def_readwrite("num_offsets", &GemmEntry::num_offsets) // Corrected field name
+    //     .def_readwrite("gemm_M", &GemmEntry::gemm_M) // Corrected field name
+    //     .def_readwrite("len_inputs", &GemmEntry::len_inputs) // Corrected field name
+    //     .def_readwrite("len_outputs", &GemmEntry::len_outputs) // Corrected field name
+    //     .def_readwrite("padding", &GemmEntry::padding)
+    //     .def_readwrite("offsets_data", &GemmEntry::offsets_data) // Corrected field name
+    //     .def_readwrite("inputs_data", &GemmEntry::inputs_data) // Corrected field name
+    //     .def_readwrite("outputs_data", &GemmEntry::outputs_data); // Corrected field name
+
+    // // Bind Minuet Gather Functions
+    // // Ensure argument names in lambda match C++ function for clarity, though not strictly necessary for pybind
+    // m.def("create_slot_array_cpp", &create_slot_array_cpp,
+    //       py::arg("kernel_map")); // Corrected: takes KernelMapType
+
+    // // Binding for create_in_out_masks_cpp
+    // // The C++ function returns std::pair<std::vector<int>, std::vector<int>>
+    // // pybind11 automatically converts this to a Python tuple of lists.
+    // m.def("create_in_out_masks_cpp", &create_in_out_masks_cpp,
+    //       py::arg("kernel_map"), 
+    //       py::arg("slot_dict"), 
+    //       py::arg("num_total_offsets"), 
+    //       py::arg("num_total_sources"));
+
+    // // Binding for greedy_group_cpp
+    // // The C++ function returns std::tuple<std::vector<int>, std::vector<GroupInfo>, std::vector<GemmEntry>>
+    // // pybind11 automatically converts this to a Python tuple.
+    // // The last argument max_slots_opt is std::optional<int>. Pybind11 handles optional automatically.
+    // m.def("greedy_group_cpp", &greedy_group_cpp,
+    //       py::arg("idx_kmap"), 
+    //       py::arg("offsets_active"), 
+    //       py::arg("slots"), 
+    //       py::arg("alignment"), 
+    //       py::arg("max_group"), 
+    //       py::arg("max_slots_opt") = std::nullopt); // Provide default for optional
+
 }

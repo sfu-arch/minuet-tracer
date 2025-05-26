@@ -17,6 +17,7 @@
 #include <cstring>
 #include "minuet_config.hpp" // Include the new config header
 #include "coord.hpp"         // Include the new coord header
+#include "sorted_map.hpp"    // Include the new sorted_map header
 
 // --- Forward declaration for tuple printing ---
 // This might be redundant if coord.hpp or another utility handles it.
@@ -170,9 +171,18 @@ TilesPivotsResult create_tiles_and_pivots(
 // Kernel Map type (matches Python's kmap structure)
 // Key: offset_key (packed Coord3D of the offset)
 // Value: list of pairs (input_idx from uniq_coords, query_src_orig_idx from qry_keys)
-using KernelMap = std::map<uint32_t, std::vector<std::pair<int, int>>>;
+// using KernelMap = std::map<uint32_t, std::vector<std::pair<int, int>>>;
+// Replace std::map with SortedByValueSizeMap for KernelMap
+// The key is the offset (uint32_t), and the value is a vector of pairs (matches).
+// We want to sort by the size of this vector (number of matches).
+// True for ascending (shortest first), False for descending (longest first).
+// Python's SortedByValueLengthDict defaults to ascending=True, but for kmap processing
+// in minuet_trace.py, it seems to imply a descending sort for offsets_active (longest match list first).
+// Let's assume descending for now, as it's common for processing more significant items first.
+using KernelMapType = SortedByValueSizeMap<uint32_t, std::vector<std::pair<int, int>>>;
 
-KernelMap perform_coordinate_lookup( // Renamed from lookup
+
+KernelMapType perform_coordinate_lookup( // Renamed from lookup
     const std::vector<IndexedCoord>& uniq_coords,
     const std::vector<IndexedCoord>& qry_keys,
     const std::vector<int>& qry_in_idx,
@@ -184,7 +194,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
 );
 
 void write_kernel_map_to_gz(
-    const KernelMap& kmap_data,
+    const KernelMapType& kmap_data, // Changed KernelMap to KernelMapType
     const std::string& filename,
     const std::vector<Coord3D>& off_list // List of offset coordinates
 );

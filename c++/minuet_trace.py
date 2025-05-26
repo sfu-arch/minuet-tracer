@@ -42,6 +42,11 @@ except ImportError as e:
 project_root_dir = os.path.abspath(os.path.join(script_dir, '..'))
 config_file_path = os.path.join(project_root_dir, "config.json")
 
+# Add project_root_dir to sys.path for Python utility modules like minuet_mapping
+if project_root_dir not in sys.path:
+    sys.path.insert(0, project_root_dir) # Insert at high priority
+    print(f"Added project root {project_root_dir} to sys.path for utility modules.")
+
 if os.path.exists(config_file_path):
     print(f"Attempting to load configuration from: {config_file_path}")
     if minuet_cpp.load_config_from_file(config_file_path):
@@ -202,34 +207,41 @@ def main():
     # and values are lists of (input_idx, query_src_orig_idx)
     # The C++ kmap has offset_key (packed Coord3D) as keys.
 
-    # Convert C++ kmap to Python-expected kmap format for gather/scatter
-    # Create a mapping from original Python offset tuples to their indices
-    offset_tuple_to_idx = {tuple_val: i for i, tuple_val in enumerate(offset_coords_tuples_raw)}
+    # py_kmap_for_gather will be built directly from kernel_map_result_cpp
+    # kernel_map_result_cpp is already sorted by the C++ SortedByValueSizeMap logic.
+    # The Python greedy_group expects keys to be offset indices if it does its own sorting,
+    # but if we provide offsets_active and slot_array pre-sorted, it should work with uint32_t keys.
+    # Let's ensure py_kmap_for_gather uses the same uint32_t keys from kernel_map_result_cpp.
 
     py_kmap_for_gather = {}
+    # The .items() from the bound C++ map should respect the C++ map's order.
     for offset_key_int, matches_list in kernel_map_result_cpp.items():
-            py_kmap_for_gather[offset_key_int] = [(p[0], p[1]) for p in matches_list]
+        # matches_list is a list of std::pair<int, int> from C++,
+        # convert to list of Python tuples [(int, int), ...]
+        py_kmap_for_gather[offset_key_int] = [(p[0], p[1]) for p in matches_list]
         
-    # Sort py_kmap_for_gather by length of matches for greedy_group (if it doesn't do it internally)
-    # The original Python kmap was a SortedByValueLengthDict.
-    # For greedy_group, we need offsets_active and slot_array.
-    
-    # Create offsets_active and slot_array based on py_kmap_for_gather
-    # Sort by number of matches (descending) then by offset_idx (ascending)
-    sorted_offsets_by_matches = sorted(
-        py_kmap_for_gather.keys(),
-        key=lambda off_idx: (len(py_kmap_for_gather[off_idx]), -off_idx), # Sort by len desc, then idx asc
-        reverse=True
-    )
-    
-    offsets_active = [off_idx for off_idx in sorted_offsets_by_matches if py_kmap_for_gather[off_idx]]
-    slot_array = [len(py_kmap_for_gather[off_idx]) for off_idx in offsets_active]
+    # Create offsets_active and slot_array based on the order from kernel_map_result_cpp.items()
+    # This order is: by number of matches (descending), then by offset_key_int (ascending).
+    offsets_active = []
+    slot_array = []
+    for offset_key_int, matches_list in py_kmap_for_gather.items(): # py_kmap_for_gather will be ordered if kernel_map_result_cpp.items() is
+        if matches_list: # Only include if there are matches
+            offsets_active.append(offset_key_int)
+            slot_array.append(len(matches_list))
 
-    print("\\n--- Phase: Gather/Scatter Metadata (Python) ---")
-    if cpp_global_config.debug: # Use Python's debug flag for this section
-        print("Offsets sorted by matches count (for Python gather):", offsets_active)
-        print("Slot array (for Python gather):", slot_array)
+    # No explicit sort needed here if kernel_map_result_cpp.items() gives the desired order.
+    # The original Python code sorted a dictionary. Here, py_kmap_for_gather is built
+    # in the order provided by kernel_map_result_cpp.items().
 
+    print("\\n--- Phase: Gather/Scatter Metadata (Python using C++ KMap order) ---")
+    if cpp_global_config.debug: 
+        print("Offsets active (derived from C++ KernelMapType iteration order):")
+        for o_idx, o_key in enumerate(offsets_active):
+            print(f"  [{o_idx}] {hex(o_key)} (Matches: {len(py_kmap_for_gather[o_key])})")
+        print("Slot array (derived from C++ KernelMapType iteration order):", slot_array)
+
+    # Python's greedy_group and create_in_out_masks will be used.
+    # They need py_kmap_for_gather, offsets_active, and slot_array.
     slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
         py_kmap_for_gather,
         offsets_active,
