@@ -15,7 +15,10 @@
 #include <functional>
 #include <type_traits> // For std::enable_if
 #include <cstring>
+#include "minuet_config.hpp" // Include the new config header
 // --- Forward declaration for tuple printing ---
+
+
 template<typename... Args>
 std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t);
 
@@ -51,36 +54,36 @@ public:
 
 
 // --- Global Constants (from minuet_config.py and minuet_mapping.py) ---
-// Number of virtual threads
-const int NUM_THREADS = 4;
-const int SIZE_KEY    = 4;
-const int SIZE_INT    = 4;
-const int SIZE_WEIGHT = 4;
+// These are now part of the g_config object and loaded from JSON
+// const int NUM_THREADS = 4;
+// const int SIZE_KEY    = 4;
+// const int SIZE_INT    = 4;
+// const int SIZE_WEIGHT = 4;
 
-// Tensor Regions
-const uint64_t I_BASE    = 0x10000000;
-const uint64_t TILE_BASE = I_BASE; // Alias
-const uint64_t QK_BASE   = 0x20000000;
-const uint64_t QI_BASE   = 0x30000000;
-const uint64_t QO_BASE   = 0x40000000;
-const uint64_t PIV_BASE  = 0x50000000;
-const uint64_t KM_BASE   = 0x60000000;
-const uint64_t WO_BASE   = 0x80000000;
-const uint64_t IV_BASE   = 0x100000000; // Feature vectors (64-bit)
-const uint64_t WV_BASE   = 0xF00000000; // Weight values (64-bit)
+// // Tensor Regions
+// const uint64_t I_BASE    = 0x10000000;
+// const uint64_t TILE_BASE = I_BASE; // Alias
+// const uint64_t QK_BASE   = 0x20000000;
+// const uint64_t QI_BASE   = 0x30000000;
+// const uint64_t QO_BASE   = 0x40000000;
+// const uint64_t PIV_BASE  = 0x50000000;
+// const uint64_t KM_BASE   = 0x60000000;
+// const uint64_t WO_BASE   = 0x80000000;
+// const uint64_t IV_BASE   = 0x100000000; // Feature vectors (64-bit)
+// const uint64_t WV_BASE   = 0xF00000000; // Weight values (64-bit)
 
 
-// GEMM Parameters (used in gather, but defined in config)
-const int GEMM_ALIGNMENT = 4;
-const int GEMM_WT_GROUP = 2;
-const int GEMM_SIZE = 4;
+// // GEMM Parameters (used in gather, but defined in config)
+// const int GEMM_ALIGNMENT = 4;
+// const int GEMM_WT_GROUP = 2;
+// const int GEMM_SIZE = 4;
 
-// GATHER PARAMETERS (used in gather, but defined in config)
-const int NUM_TILES = 2;
-const int TILE_FEATS = 16;
-const int BULK_FEATS = 4;
-const int N_THREADS_GATHER = 1; // Renamed from N_THREADS to avoid conflict
-const int TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS;
+// // GATHER PARAMETERS (used in gather, but defined in config)
+// const int NUM_TILES = 2;
+// const int TILE_FEATS = 16;
+// const int BULK_FEATS = 4;
+// const int N_THREADS_GATHER = 1; // Renamed from N_THREADS to avoid conflict
+// const int TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS;
 
 
 // PHASES, TENSORS, OPS (from minuet_mapping.py)
@@ -88,6 +91,9 @@ const int TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS;
 extern bidict<std::string, int> PHASES;
 extern bidict<std::string, int> TENSORS;
 extern bidict<std::string, int> OPS;
+
+// Helper function to convert value to hex string
+std::string to_hex_string(uint64_t val);
 
 
 // --- Data Structures ---

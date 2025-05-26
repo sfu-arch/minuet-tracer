@@ -13,23 +13,23 @@ def pack32(*coords):
     return key
 
 def unpack32(key):
-    z = key & 0x3FF; key >>= 10
+    x = key & 0x3FF; key >>= 10
     y = key & 0x3FF; key >>= 10
-    x = key & 0x3FF; key >>= 10 
+    z = key & 0x3FF; key >>= 10 
     return (x, y, z)
 
 def unpack32s(key):
     """Unpack signed 10 bit integers"""
-    z = key & 0x3FF
-    z = z if z < 512 else z - 1024
+    x = key & 0x3FF
+    x = x if x < 512 else x - 1024
     key >>= 10
 
     y = key & 0x3FF
     y = y if y < 512 else y - 1024
     key >>= 10
 
-    x = key & 0x3FF
-    x = x if x < 512 else x - 1024
+    z = key & 0x3FF
+    z = z if z < 512 else z - 1024
     return (x, y, z)
 
 @dataclass

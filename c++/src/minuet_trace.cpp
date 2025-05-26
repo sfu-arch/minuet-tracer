@@ -13,8 +13,6 @@
 // --- Global Variable Definitions ---
 std::vector<MemoryAccessEntry> mem_trace; // Updated name
 std::string curr_phase = "";              // Updated name
-bool debug = false; // Changed from true to false to match python default
-const std::string output_dir = "out/"; // Added
 
 // --- Getter/Setter for global state and mem_trace management ---
 std::vector<MemoryAccessEntry> get_mem_trace() {
@@ -34,11 +32,11 @@ std::string get_curr_phase() {
 }
 
 void set_debug_flag(bool debug_val) {
-    debug = debug_val;
+    g_config.debug = debug_val; // Set in global config
 }
 
 bool get_debug_flag() {
-    return debug;
+    return g_config.debug; // Get from global config
 }
 
 // Global constant maps (matching Python names for clarity)
@@ -73,6 +71,14 @@ Coord3D Coord3D::from_signed_key(uint32_t key) { // Added
 }
 
 // --- Packing/Unpacking (10-bit fields) ---
+
+// Helper function to convert value to hex string (moved from main.cpp for broader use)
+std::string to_hex_string(uint64_t val) {
+    std::stringstream ss;
+    ss << "0x" << std::hex << val;
+    return ss.str();
+}
+
 uint32_t pack32(int c1, int c2, int c3) {
   // Packs three 10-bit integer coordinates into a single 30-bit key within a
   // uint32_t. c1: bits 20-29, c2: bits 10-19, c3: bits 0-9
@@ -115,25 +121,19 @@ std::tuple<int, int, int> unpack32s(uint32_t key) {
 }
 
 // --- Memory Tracing Functions ---
-std::string to_hex_string(uint64_t val) {
-  std::stringstream ss;
-  ss << "0x" << std::hex << val;
-  return ss.str();
-}
-
 std::string addr_to_tensor(uint64_t addr) { // Renamed
   // Order of checks matters, more specific ranges first.
-  if (addr >= WO_BASE && addr < IV_BASE)
+  if (addr >= g_config.WO_BASE && addr < g_config.IV_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("WO"));
-  if (addr >= KM_BASE && addr < WO_BASE)
+  if (addr >= g_config.KM_BASE && addr < g_config.WO_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("KM"));
-  if (addr >= PIV_BASE && addr < KM_BASE)
+  if (addr >= g_config.PIV_BASE && addr < g_config.KM_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("PIV"));
-  if (addr >= QO_BASE && addr < PIV_BASE)
+  if (addr >= g_config.QO_BASE && addr < g_config.PIV_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("QO"));
-  if (addr >= QI_BASE && addr < QO_BASE)
+  if (addr >= g_config.QI_BASE && addr < g_config.QO_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("QI"));
-  if (addr >= QK_BASE && addr < QI_BASE)
+  if (addr >= g_config.QK_BASE && addr < g_config.QI_BASE)
     return TENSORS.inverse.at(TENSORS.forward.at("QK"));
   // I_BASE and TILE_BASE are the same. If it's in this range and not caught
   // above, it's I or TILE. Python logic implies TILE is an alias for I, so we
@@ -145,7 +145,7 @@ std::string addr_to_tensor(uint64_t addr) { // Renamed
   // specific tile operations need to be logged as "TILE", the logic might need
   // adjustment based on when those operations occur, possibly by setting
   // curr_phase or another indicator.
-  if (addr >= I_BASE && addr < QK_BASE) { // QK_BASE is the next boundary after
+  if (addr >= g_config.I_BASE && addr < g_config.QK_BASE) { // QK_BASE is the next boundary after
                                           // I_BASE for distinct tensors
     // If we are in a phase that specifically reads tiles, we might label it
     // TILE. For now, stick to the direct address range mapping like Python's
@@ -154,9 +154,9 @@ std::string addr_to_tensor(uint64_t addr) { // Renamed
   }
   // IV_BASE and WV_BASE are for features, not typically in the mapping phase
   // trace but included for completeness if other operations use them.
-  if (addr >= IV_BASE && addr < WV_BASE)
+  if (addr >= g_config.IV_BASE && addr < g_config.WV_BASE)
     return "IV"; // Not in TENSORS map, handle as string
-  if (addr >= WV_BASE)
+  if (addr >= g_config.WV_BASE)
     return "WV"; // Not in TENSORS map, handle as string
 
   return "Unknown"; // Default if no range matches
@@ -262,14 +262,14 @@ std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t> &arr,
 
     // We simulate N elements being processed.
     for (size_t i = 0; i < N; ++i) {
-      int t_id = static_cast<int>(i % NUM_THREADS);
+      int t_id = static_cast<int>(i % g_config.NUM_THREADS);
       // First read of an element from arr
-      record_access(t_id, OPS.inverse.at(0), base_addr + i * SIZE_KEY); // "R"
+      record_access(t_id, OPS.inverse.at(0), base_addr + i * g_config.SIZE_KEY); // "R"
     }
     for (size_t i = 0; i < N; ++i) {
-      int t_id = static_cast<int>(i % NUM_THREADS);
+      int t_id = static_cast<int>(i % g_config.NUM_THREADS);
       // Second read of the same element from arr
-      record_access(t_id, OPS.inverse.at(0), base_addr + i * SIZE_KEY); // "R"
+      record_access(t_id, OPS.inverse.at(0), base_addr + i * g_config.SIZE_KEY); // "R"
 
       // Write to auxiliary array (simulated position)
       // In a real sort, this write would be to aux[calculated_pos]
@@ -277,7 +277,7 @@ std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t> &arr,
       // using 'i' as a proxy for calculated_pos to ensure N writes.
       // The base address for aux is assumed to be the same as arr for this
       // trace.
-      record_access(t_id, OPS.inverse.at(1), base_addr + i * SIZE_KEY); // "W"
+      record_access(t_id, OPS.inverse.at(1), base_addr + i * g_config.SIZE_KEY); // "W"
     }
     // arr, aux = aux, arr // Conceptually, data is swapped or copied back
     // If arr is swapped with aux, the next pass reads from what was aux.
@@ -302,7 +302,7 @@ compute_unique_sorted_coords(const std::vector<Coord3D> &in_coords,
     // This write is for the initial list of idx_keys before sorting.
     // Let's assume I_BASE is the start of a conceptual array for these packed
     // keys. record_access(static_cast<int>(idx % NUM_THREADS),
-    // OPS.inverse.at(1), I_BASE + idx * SIZE_KEY); // "W"
+    // OPS.inverse.at(1), g_config.I_BASE + idx * g_config.SIZE_KEY); // "W"
     Coord3D qtz_coord = coord.quantized(stride);
     idx_keys_pairs.emplace_back(qtz_coord.to_key(), static_cast<int>(idx));
   }
@@ -314,7 +314,7 @@ compute_unique_sorted_coords(const std::vector<Coord3D> &in_coords,
     raw_keys.push_back(pair.first);
   }
   // The base address for radix sort in Python is I_BASE.
-  radix_sort_with_memtrace(raw_keys, I_BASE);
+  radix_sort_with_memtrace(raw_keys, g_config.I_BASE);
 
   // Sort idx_keys_pairs by key, preserving original index for tie-breaking
   // (std::stable_sort if needed) Python's `sorted(idx_keys, key=lambda item:
@@ -332,14 +332,14 @@ compute_unique_sorted_coords(const std::vector<Coord3D> &in_coords,
   int orig_idx_from_input = idx_keys_pairs[0].second;
   // Python: record_access(0 % NUM_THREADS, 'R', I_BASE + 0 * SIZE_KEY)
   // This read is for accessing the sorted key during deduplication.
-  record_access(0 % NUM_THREADS, OPS.inverse.at(0),
-                I_BASE + 0 * SIZE_KEY); // "R"
+  record_access(0 % g_config.NUM_THREADS, OPS.inverse.at(0),
+                g_config.I_BASE + 0 * g_config.SIZE_KEY); // "R"
   uniq_coords_vec.emplace_back(Coord3D::from_key(last_key),
                                orig_idx_from_input);
 
   for (size_t i = 1; i < idx_keys_pairs.size(); ++i) {
     // record_access(static_cast<int>(i % NUM_THREADS), OPS.inverse.at(0),
-    //               I_BASE + i * SIZE_KEY); // "R"
+    //               g_config.I_BASE + i * g_config.SIZE_KEY); // "R"
     if (idx_keys_pairs[i].first != last_key) {
       last_key = idx_keys_pairs[i].first;
       orig_idx_from_input = idx_keys_pairs[i].second;
@@ -348,7 +348,7 @@ compute_unique_sorted_coords(const std::vector<Coord3D> &in_coords,
     }
   }
 
-  if (debug) {
+  if (g_config.debug) {
     std::cout << "Unique sorted coordinates (count: " << uniq_coords_vec.size()
               << ")" << std::endl;
     for (const auto &ic : uniq_coords_vec) {
@@ -385,7 +385,7 @@ build_coordinate_queries(const std::vector<IndexedCoord> &uniq_coords,
       // Python version does not record accesses in this function.
       // Removing record_access calls.
       // record_access(static_cast<int>(glob_idx % NUM_THREADS),
-      // OPS.inverse.at(0), I_BASE + in_idx * SIZE_KEY); // "R"
+      // OPS.inverse.at(0), g_config.I_BASE + in_idx * g_config.SIZE_KEY); // "R"
 
       Coord3D qk_coord = indexed_coord_item.coord + offset_val;
       result.qry_keys[glob_idx] =
@@ -396,13 +396,13 @@ build_coordinate_queries(const std::vector<IndexedCoord> &uniq_coords,
 
       // Removing record_access calls for writes.
       // record_access(static_cast<int>(glob_idx % NUM_THREADS),
-      // OPS.inverse.at(1), QK_BASE + glob_idx * SIZE_KEY);    // "W" for
+      // OPS.inverse.at(1), g_config.QK_BASE + glob_idx * g_config.SIZE_KEY);    // "W" for
       // qry_key record_access(static_cast<int>(glob_idx % NUM_THREADS),
-      // OPS.inverse.at(1), QI_BASE + glob_idx * SIZE_INT);    // "W" for
+      // OPS.inverse.at(1), g_config.QI_BASE + glob_idx * g_config.SIZE_INT);    // "W" for
       // qry_in_idx record_access(static_cast<int>(glob_idx % NUM_THREADS),
-      // OPS.inverse.at(1), QO_BASE + glob_idx * SIZE_INT);    // "W" for
+      // OPS.inverse.at(1), g_config.QO_BASE + glob_idx * g_config.SIZE_INT);    // "W" for
       // qry_off_idx record_access(static_cast<int>(glob_idx % NUM_THREADS),
-      // OPS.inverse.at(1), WO_BASE + glob_idx * SIZE_WEIGHT); // "W" for
+      // OPS.inverse.at(1), g_config.WO_BASE + glob_idx * g_config.SIZE_WEIGHT); // "W" for
       // wt_offset (packed key)
     }
   }
@@ -419,7 +419,7 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
   int current_tile_size = tile_size_param;
 
   if (uniq_coords.empty()) {
-    if (debug)
+    if (g_config.debug)
       std::cout << "Skipping tile creation, no unique coordinates."
                 << std::endl;
     return result;
@@ -429,11 +429,11 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
     current_tile_size = static_cast<int>(uniq_coords.size());
     if (current_tile_size == 0) { // Still could be zero if uniq_coords was
                                   // empty and handled above, but defensive
-      if (debug)
+      if (g_config.debug)
         std::cout << "Tile size is zero, cannot create tiles." << std::endl;
       return result; // No tiles can be made
     }
-    if (debug)
+    if (g_config.debug)
       std::cout << "Tile size not specified or invalid, using full range: "
                 << current_tile_size << std::endl;
   }
@@ -447,28 +447,28 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
       // Read unique coordinate for tiling
       // Python: record_access(i % NUM_THREADS, 'R', I_BASE + i * SIZE_KEY)
       // record_access(static_cast<int>(i % NUM_THREADS), OPS.inverse.at(0),
-      // I_BASE + i * SIZE_KEY); // "R"
+      // g_config.I_BASE + i * g_config.SIZE_KEY); // "R"
       current_tile.push_back(uniq_coords[i]);
 
       // Write to conceptual tile data region (simulated)
       // Python: record_access(i % NUM_THREADS, 'W', TILE_BASE + i * SIZE_KEY)
       // TILE_BASE is an alias for I_BASE. This implies an in-place usage or
       // conceptual copy. record_access(static_cast<int>(i % NUM_THREADS),
-      // OPS.inverse.at(1), TILE_BASE + i * SIZE_KEY); // "W"
+      // OPS.inverse.at(1), g_config.TILE_BASE + i * g_config.SIZE_KEY); // "W"
     }
     result.tiles.push_back(current_tile);
 
     // Add pivot: the first element of the tile
     // Python: record_access(start % NUM_THREADS, 'R', I_BASE + start *
     // SIZE_KEY) record_access(static_cast<int>(start % NUM_THREADS),
-    // OPS.inverse.at(0), I_BASE + start * SIZE_KEY); // "R" for pivot
+    // OPS.inverse.at(0), g_config.I_BASE + start * g_config.SIZE_KEY); // "R" for pivot
     result.pivots.push_back(uniq_coords[start]);
     // Write pivot key
     // Python: record_access( (start // tile_size) % NUM_THREADS, 'W', PIV_BASE
     // + (start // tile_size) * SIZE_KEY)
-    record_access(static_cast<int>((start / current_tile_size) % NUM_THREADS),
+    record_access(static_cast<int>((start / current_tile_size) % g_config.NUM_THREADS),
                   OPS.inverse.at(1),
-                  PIV_BASE + (start / current_tile_size) * SIZE_KEY); // "W"
+                  g_config.PIV_BASE + (start / current_tile_size) * g_config.SIZE_KEY); // "W"
   }
   return result;
 }
@@ -494,11 +494,11 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
     int query_original_src_idx = q_key_item.orig_idx;
     int current_offset_idx =
         qry_off_idx[q_glob_idx]; // Index for off_coords / wt_offsets
-    int tid = static_cast<int>(q_glob_idx % NUM_THREADS);
+    int tid = static_cast<int>(q_glob_idx % g_config.NUM_THREADS);
 
     // 1. Read query key
     record_access(tid, OPS.inverse.at(0),
-                  QK_BASE + q_glob_idx * SIZE_KEY); // "R"
+                  g_config.QK_BASE + q_glob_idx * g_config.SIZE_KEY); // "R"
 
     // Simulate Python's find_tile_id (binary search on pivs)
     int target_tile_id = -1;
@@ -510,7 +510,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
       while (low <= high) {
         int mid = low + (high - low) / 2;
         record_access(tid, OPS.inverse.at(0),
-                      PIV_BASE + mid * SIZE_KEY); // "R" pivot
+                      g_config.PIV_BASE + mid * g_config.SIZE_KEY); // "R" pivot
         if (pivs[mid].to_key() <= current_query_key) {
           target_tile_id = mid;
           low = mid + 1;
@@ -546,8 +546,8 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
           }
 
           record_access(tid, OPS.inverse.at(0),
-                        TILE_BASE + approx_tile_element_orig_idx *
-                                        SIZE_KEY); // "R" from TILE
+                        g_config.TILE_BASE + approx_tile_element_orig_idx *
+                                        g_config.SIZE_KEY); // "R" from TILE
 
           if (current_tile[mid_local].to_key() == current_query_key) {
             // To get the index relative to the original uniq_coords array:
@@ -598,7 +598,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
       // Record write to kernel map (Python: KM_BASE + kmap_write_idx *
       // (SIZE_INT + SIZE_INT))
       record_access(tid, OPS.inverse.at(1),
-                    KM_BASE + kmap_write_idx * (SIZE_INT + SIZE_INT)); // "W"
+                    g_config.KM_BASE + kmap_write_idx * (g_config.SIZE_INT + g_config.SIZE_INT)); // "W"
       kmap_write_idx++;
     }
   }

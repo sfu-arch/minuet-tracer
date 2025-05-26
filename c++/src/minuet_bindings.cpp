@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/operators.h> // For operator overloading
 #include "minuet_trace.hpp"     // Your main header
+#include "minuet_config.hpp"    // Include the config header for g_config
 
 namespace py = pybind11;
 
@@ -83,8 +84,47 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     m.def("get_curr_phase", &get_curr_phase);
     m.def("set_debug_flag", &set_debug_flag, py::arg("debug_val"));
     m.def("get_debug_flag", &get_debug_flag);
-    m.attr("output_dir") = py::str(output_dir);
 
+    // Add a function to load configuration from a JSON file
+    m.def("load_config_from_file", [](const std::string& filepath) {
+        return g_config.loadFromFile(filepath);
+    }, py::arg("filepath"), "Loads configuration from a JSON file into the global C++ config object.");
+
+    // Access to global config object (read-only for Python side for safety)
+    // Expose individual fields if mutable access is needed, or provide a load function.
+    // For now, Python can see the values loaded by C++ main().
+    // If Python needs to *set* these, a dedicated function in C++ should handle it
+    // and update g_config, then Python can re-read.
+    py::class_<MinuetConfig>(m, "MinuetConfigReader") // Expose as a read-only view
+        .def_property_readonly("NUM_THREADS", [](const MinuetConfig& c){ return c.NUM_THREADS; })
+        .def_property_readonly("SIZE_KEY", [](const MinuetConfig& c){ return c.SIZE_KEY; })
+        .def_property_readonly("SIZE_INT", [](const MinuetConfig& c){ return c.SIZE_INT; })
+        .def_property_readonly("SIZE_WEIGHT", [](const MinuetConfig& c){ return c.SIZE_WEIGHT; })
+        .def_property_readonly("I_BASE", [](const MinuetConfig& c){ return c.I_BASE; })
+        .def_property_readonly("TILE_BASE", [](const MinuetConfig& c){ return c.TILE_BASE; })
+        .def_property_readonly("QK_BASE", [](const MinuetConfig& c){ return c.QK_BASE; })
+        .def_property_readonly("QI_BASE", [](const MinuetConfig& c){ return c.QI_BASE; })
+        .def_property_readonly("QO_BASE", [](const MinuetConfig& c){ return c.QO_BASE; })
+        .def_property_readonly("PIV_BASE", [](const MinuetConfig& c){ return c.PIV_BASE; })
+        .def_property_readonly("KM_BASE", [](const MinuetConfig& c){ return c.KM_BASE; })
+        .def_property_readonly("WO_BASE", [](const MinuetConfig& c){ return c.WO_BASE; })
+        .def_property_readonly("IV_BASE", [](const MinuetConfig& c){ return c.IV_BASE; })
+        .def_property_readonly("WV_BASE", [](const MinuetConfig& c){ return c.WV_BASE; })
+        .def_property_readonly("GEMM_ALIGNMENT", [](const MinuetConfig& c){ return c.GEMM_ALIGNMENT; })
+        .def_property_readonly("GEMM_WT_GROUP", [](const MinuetConfig& c){ return c.GEMM_WT_GROUP; })
+        .def_property_readonly("GEMM_SIZE", [](const MinuetConfig& c){ return c.GEMM_SIZE; })
+        .def_property_readonly("NUM_TILES", [](const MinuetConfig& c){ return c.NUM_TILES; })
+        .def_property_readonly("TILE_FEATS", [](const MinuetConfig& c){ return c.TILE_FEATS; })
+        .def_property_readonly("BULK_FEATS", [](const MinuetConfig& c){ return c.BULK_FEATS; })
+        .def_property_readonly("N_THREADS_GATHER", [](const MinuetConfig& c){ return c.N_THREADS_GATHER; })
+        .def_property_readonly("TOTAL_FEATS_PT", [](const MinuetConfig& c){ return c.TOTAL_FEATS_PT; })
+        .def_property_readonly("debug", [](const MinuetConfig& c){ return c.debug; }) // Added
+        .def_property_readonly("output_dir", [](const MinuetConfig& c){ return c.output_dir; }); // Added
+
+    // Expose the global g_config instance (as a reader)
+    m.def("get_global_config", []() -> const MinuetConfig& {
+        return g_config;
+    }, py::return_value_policy::reference); // Expose as a const reference
 
     // Bind functions
     m.def("addr_to_tensor", &addr_to_tensor, py::arg("addr"));
@@ -108,18 +148,18 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     m.def("write_kernel_map_to_gz", &write_kernel_map_to_gz,
           py::arg("kmap_data"), py::arg("filename"), py::arg("off_list"));
 
-    // Expose constants
-    m.attr("NUM_THREADS") = py::int_(NUM_THREADS);
-    m.attr("I_BASE") = py::int_(I_BASE);
-    m.attr("TILE_BASE") = py::int_(TILE_BASE);
-    m.attr("QK_BASE") = py::int_(QK_BASE);
-    m.attr("QI_BASE") = py::int_(QI_BASE);
-    m.attr("QO_BASE") = py::int_(QO_BASE);
-    m.attr("PIV_BASE") = py::int_(PIV_BASE);
-    m.attr("KM_BASE") = py::int_(KM_BASE);
-    m.attr("WO_BASE") = py::int_(WO_BASE);
-    m.attr("SIZE_KEY") = py::int_(SIZE_KEY);
-    m.attr("SIZE_INT") = py::int_(SIZE_INT);
+    // Expose constants - These are now superseded by get_global_config()
+    // m.attr("NUM_THREADS") = py::int_(NUM_THREADS);
+    // m.attr("I_BASE") = py::int_(I_BASE);
+    // m.attr("TILE_BASE") = py::int_(TILE_BASE);
+    // m.attr("QK_BASE") = py::int_(QK_BASE);
+    // m.attr("QI_BASE") = py::int_(QI_BASE);
+    // m.attr("QO_BASE") = py::int_(QO_BASE);
+    // m.attr("PIV_BASE") = py::int_(PIV_BASE);
+    // m.attr("KM_BASE") = py::int_(KM_BASE);
+    // m.attr("WO_BASE") = py::int_(WO_BASE);
+    // m.attr("SIZE_KEY") = py::int_(SIZE_KEY);
+    // m.attr("SIZE_INT") = py::int_(SIZE_INT);
 
     // Expose PHASES, TENSORS, OPS (forward maps)
     m.attr("PHASES") = PHASES.forward;

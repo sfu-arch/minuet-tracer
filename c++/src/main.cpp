@@ -1,3 +1,4 @@
+#include "minuet_config.hpp"
 #include "minuet_trace.hpp"
 #include <iostream>
 #include <vector>
@@ -23,7 +24,13 @@ std::vector<Coord3D> tuples_to_coords(const std::vector<std::tuple<int, int, int
 // For now, let's assume it's available through includes.
 std::string to_hex_string(uint64_t val); // Declaration if defined elsewhere like minuet_trace.cpp
 
-int main() {
+int main(int argc, char *argv[]) {
+    // Load configuration
+    if (!g_config.loadFromFile("config.json")) {
+        std::cerr << "Failed to load configuration. Exiting." << std::endl;
+        return 1;
+    }
+
     // --- Initial Data Setup (matches Python script's example) ---
     std::vector<std::tuple<int, int, int>> initial_coords_tuples_raw = { // Renamed from coords
         {1, 5, 0}, {0, 0, 2}, {0, 1, 1}, {0, 0, 3}
@@ -44,7 +51,7 @@ int main() {
     // --- Phase 1: Radix Sort (Unique Sorted Input Coords with Original Indices) ---
     // Python: curr_phase = PHASES['RDX']
     // C++: curr_phase is set within compute_unique_sorted_coords
-    std::cout << "\n--- Phase: " << PHASES.inverse.at(0) << " with " << NUM_THREADS << " threads ---" << std::endl;
+    std::cout << "\n--- Phase: " << PHASES.inverse.at(0) << " with " << g_config.NUM_THREADS << " threads ---" << std::endl;
     std::vector<IndexedCoord> unique_indexed_coords = compute_unique_sorted_coords(initial_coords, stride);
 
     // --- Phase 2: Build Queries ---
@@ -77,8 +84,8 @@ int main() {
     curr_phase = ""; // Clear phase
 
     // --- Print Debug Information (if enabled) ---
-    if (debug) {
-        std::cout << "\nSorted Source Array (Coordinate, Original Index):" << std::endl;
+    if (get_debug_flag()) { // Use get_debug_flag() which uses g_config.debug
+        std::cout << "\\nSorted Source Array (Coordinate, Original Index):" << std::endl;
         for (const auto& idxc_item : unique_indexed_coords) {
             std::cout << "  key=" << to_hex_string(idxc_item.to_key()) // Changed from idxc_item.coord.to_key()
                       << ", coords=" << idxc_item.coord // Uses Coord3D's operator<<
@@ -141,7 +148,7 @@ int main() {
     }
 
     // --- Write Memory Trace and Kernel Map ---
-    std::cout << "\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl;
+    std::cout << "\\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl;
     for (size_t i = 0; i < std::min(mem_trace.size(), static_cast<size_t>(10)); ++i) {
         const auto& e = mem_trace[i];
         std::cout << "  Phase: " << e.phase << ", TID: " << e.thread_id 
@@ -153,14 +160,14 @@ int main() {
     }
 
     // Create output directory if it doesn't exist
-    if (!std::filesystem::exists(output_dir)) {
-        std::filesystem::create_directories(output_dir);
-        std::cout << "Created output directory: " << output_dir << std::endl;
+    if (!std::filesystem::exists(g_config.output_dir)) { // Use g_config.output_dir
+        std::filesystem::create_directories(g_config.output_dir);
+        std::cout << "Created output directory: " << g_config.output_dir << std::endl;
     }
 
     try {
-        write_gmem_trace(output_dir + "map_trace.bin.gz");
-        write_kernel_map_to_gz(kernel_map_result, output_dir + "kernel_map.bin.gz", offset_coords);
+        write_gmem_trace(g_config.output_dir + "map_trace.bin.gz"); // Use g_config.output_dir
+        write_kernel_map_to_gz(kernel_map_result, g_config.output_dir + "kernel_map.bin.gz", offset_coords); // Use g_config.output_dir
     } catch (const std::exception& e) {
         std::cerr << "Error during file writing: " << e.what() << std::endl;
         return 1;
