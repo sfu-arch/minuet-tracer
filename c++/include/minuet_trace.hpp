@@ -16,11 +16,13 @@
 #include <type_traits> // For std::enable_if
 #include <cstring>
 #include "minuet_config.hpp" // Include the new config header
+#include "coord.hpp"         // Include the new coord header
+
 // --- Forward declaration for tuple printing ---
-
-
-template<typename... Args>
-std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t);
+// This might be redundant if coord.hpp or another utility handles it.
+// For now, keep if it's used by other parts of minuet_trace.hpp/cpp.
+// template<typename... Args>
+// std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t);
 
 // --- Bidirectional map helper ---
 template <typename K, typename V>
@@ -93,85 +95,10 @@ extern bidict<std::string, int> TENSORS;
 extern bidict<std::string, int> OPS;
 
 // Helper function to convert value to hex string
-std::string to_hex_string(uint64_t val);
 
 
 // --- Data Structures ---
-
-/**
- * @brief Represents a 3D coordinate.
- */
-struct Coord3D {
-    int x, y, z;
-
-    Coord3D(int x_ = 0, int y_ = 0, int z_ = 0) : x(x_), y(y_), z(z_) {}
-
-    /**
-     * @brief Returns quantized coordinates based on stride.
-     */
-    Coord3D quantized(int stride) const {
-        if (stride == 0) return *this; // Avoid division by zero
-        return Coord3D(x / stride, y / stride, z / stride);
-    }
-
-    /**
-     * @brief Converts coordinate to packed 30-bit key.
-     * Uses the global pack32 function.
-     */
-    uint32_t to_key() const; // Definition in .cpp due to pack32 dependency
-
-    /**
-     * @brief Creates coordinate from packed key using signed unpacking.
-     */
-    static Coord3D from_key(uint32_t key); // Definition in .cpp
-    static Coord3D from_signed_key(uint32_t key); // Added
-
-    /**
-     * @brief Adds two coordinates.
-     */
-    Coord3D operator+(const Coord3D& other) const {
-        return Coord3D(x + other.x, y + other.y, z + other.z);
-    }
-
-    // For printing Coord3D objects
-    friend std::ostream& operator<<(std::ostream& os, const Coord3D& c) {
-        os << "(" << c.x << ", " << c.y << ", " << c.z << ")";
-        return os;
-    }
-};
-
-/**
- * @brief Represents a coordinate with an associated original index.
- */
-struct IndexedCoord {
-    Coord3D coord;
-    int orig_idx; // Corresponds to original_index_from_input in Python
-    uint32_t key_val; // Store the packed key for direct use
-
-    IndexedCoord(Coord3D c = Coord3D(), int idx = -1) : coord(c), orig_idx(idx) {
-        key_val = coord.to_key();
-    }
-    IndexedCoord(uint32_t k, int idx = -1) : key_val(k), orig_idx(idx) {
-        coord = Coord3D::from_key(k); // Or from_signed_key if appropriate
-    }
-
-
-    /**
-     * @brief Converts the internal coordinate to a packed 30-bit key.
-     */
-    uint32_t to_key() const {
-        return key_val; // Use stored key
-    }
-
-    /**
-     * @brief Creates an IndexedCoord from a packed key and an index.
-     * Uses Coord3D::from_key for coordinate creation.
-     */
-    static IndexedCoord from_key_and_index(uint32_t key, int idx) {
-        return IndexedCoord(Coord3D::from_key(key), idx);
-    }
-};
-
+// Coord3D and IndexedCoord are now in coord.hpp
 
 // --- Global Memory Trace Setup ---
 struct MemoryAccessEntry {
@@ -198,9 +125,9 @@ bool get_debug_flag();
 // --- Function Declarations (matching Python functions) ---
 
 // Helper: pack/unpack (already in .cpp, ensure signatures match if used directly)
-uint32_t pack32(int c1, int c2, int c3);
-std::tuple<int, int, int> unpack32(uint32_t key);
-std::tuple<int, int, int> unpack32s(uint32_t key); // For signed unpacking
+// uint32_t pack32(int c1, int c2, int c3);
+// std::tuple<int, int, int> unpack32(uint32_t key);
+// std::tuple<int, int, int> unpack32s(uint32_t key); // For signed unpacking
 
 // Memory tracing
 std::string addr_to_tensor(uint64_t addr);

@@ -26,13 +26,14 @@ MinuetConfig::MinuetConfig() :
     GEMM_WT_GROUP(2),
     GEMM_SIZE(4),
     NUM_TILES(2),
-    TILE_FEATS(16),
-    BULK_FEATS(4),
-    N_THREADS_GATHER(1),
-    TOTAL_FEATS_PT(NUM_TILES* TILE_FEATS),
+    TILE_FEATS(32), // Changed default value
+    BULK_FEATS(256), // Changed default value
+    N_THREADS_GATHER(8), // Changed default value
+    TOTAL_FEATS_PT(256), // Changed default value
     debug(false), // Initialize debug flag
-    output_dir("out/") // Initialize output_dir
-    {}
+    output_dir("./trace_out"), // Initialize output_dir
+    NUM_PIVOTS(2) // Default value for NUM_PIVOTS
+{}
 
 // Function to load configuration from a JSON file
 bool MinuetConfig::loadFromFile(const std::string& filepath) {
@@ -96,6 +97,7 @@ bool MinuetConfig::loadFromFile(const std::string& filepath) {
         TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS; // Recalculate
         debug = data.value("debug", debug); // Load debug flag
         output_dir = data.value("output_dir", output_dir); // Load output_dir
+        NUM_PIVOTS = data.value("NUM_PIVOTS", NUM_PIVOTS); // Load NUM_PIVOTS
 
     } catch (const nlohmann::json::parse_error& e) {
         std::cerr << "JSON parse error: " << e.what() << std::endl;

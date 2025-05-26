@@ -57,68 +57,12 @@ bidict<std::string, int> TENSORS({
 
 bidict<std::string, int> OPS({{"R", 0}, {"W", 1}});
 
-// --- Coord3D method definitions ---
-uint32_t Coord3D::to_key() const { return pack32(x, y, z); }
-
-Coord3D Coord3D::from_key(uint32_t key) {
-  auto [ux, uy, uz] = unpack32s(key); // Using signed unpack consistently
-  return Coord3D(ux, uy, uz);
-}
-
-Coord3D Coord3D::from_signed_key(uint32_t key) { // Added
-  auto [sx, sy, sz] = unpack32s(key);
-  return Coord3D(sx, sy, sz);
-}
-
-// --- Packing/Unpacking (10-bit fields) ---
-
-// Helper function to convert value to hex string (moved from main.cpp for broader use)
 std::string to_hex_string(uint64_t val) {
     std::stringstream ss;
     ss << "0x" << std::hex << val;
     return ss.str();
 }
 
-uint32_t pack32(int c1, int c2, int c3) {
-  // Packs three 10-bit integer coordinates into a single 30-bit key within a
-  // uint32_t. c1: bits 20-29, c2: bits 10-19, c3: bits 0-9
-  uint32_t key = 0;
-  key = (key << 10) | (static_cast<uint32_t>(c1) & 0x3FF);
-  key = (key << 10) | (static_cast<uint32_t>(c2) & 0x3FF);
-  key = (key << 10) | (static_cast<uint32_t>(c3) & 0x3FF);
-  return key;
-}
-
-std::tuple<int, int, int> unpack32(uint32_t key) {
-  // Unpacks a 30-bit key (stored in uint32_t) into three 10-bit integer
-  // coordinates. Assumes c3 is LSB, c1 is MSB of the 30-bit value.
-  int c3 = static_cast<int>(key & 0x3FF);
-  key >>= 10;
-  int c2 = static_cast<int>(key & 0x3FF);
-  key >>= 10;
-  int c1 = static_cast<int>(key & 0x3FF);
-  return std::make_tuple(c1, c2, c3);
-}
-
-std::tuple<int, int, int> unpack32s(uint32_t key) {
-  // Unpacks a 30-bit key into three 10-bit signed integers.
-  // Sign extension for 10-bit numbers: if value >= 512 (0x200), it's negative.
-  // Subtract 1024 (0x400).
-  uint32_t temp_key = key;
-
-  int c3_val = static_cast<int>(temp_key & 0x3FF);
-  c3_val = (c3_val < 512) ? c3_val : c3_val - 1024;
-  temp_key >>= 10;
-
-  int c2_val = static_cast<int>(temp_key & 0x3FF);
-  c2_val = (c2_val < 512) ? c2_val : c2_val - 1024;
-  temp_key >>= 10;
-
-  int c1_val = static_cast<int>(temp_key & 0x3FF);
-  c1_val = (c1_val < 512) ? c1_val : c1_val - 1024;
-
-  return std::make_tuple(c1_val, c2_val, c3_val);
-}
 
 // --- Memory Tracing Functions ---
 std::string addr_to_tensor(uint64_t addr) { // Renamed

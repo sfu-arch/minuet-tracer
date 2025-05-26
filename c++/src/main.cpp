@@ -25,9 +25,14 @@ std::vector<Coord3D> tuples_to_coords(const std::vector<std::tuple<int, int, int
 std::string to_hex_string(uint64_t val); // Declaration if defined elsewhere like minuet_trace.cpp
 
 int main(int argc, char *argv[]) {
+    std::string config_filepath = "config.json"; // Default config file path
+    if (argc > 1) {
+        config_filepath = argv[1]; // Use path from command line argument if provided
+    }
+
     // Load configuration
-    if (!g_config.loadFromFile("config.json")) {
-        std::cerr << "Failed to load configuration. Exiting." << std::endl;
+    if (!g_config.loadFromFile(config_filepath)) {
+        std::cerr << "Failed to load configuration from " << config_filepath << ". Exiting." << std::endl;
         return 1;
     }
 
@@ -70,7 +75,7 @@ int main(int argc, char *argv[]) {
     // Python: curr_phase = PHASES['PVT']
     // C++: curr_phase is set within create_tiles_and_pivots
     std::cout << "--- Phase: " << PHASES.inverse.at(3) << " ---" << std::endl;
-    TilesPivotsResult tiles_pivots_data = create_tiles_and_pivots(unique_indexed_coords, 2); // Python example uses tile_size = 2
+    TilesPivotsResult tiles_pivots_data = create_tiles_and_pivots(unique_indexed_coords, g_config.NUM_PIVOTS); // Python example uses tile_size = 2
 
     // --- Phase 5: Lookup ---
     // Python: curr_phase = PHASES['LKP']
@@ -79,7 +84,7 @@ int main(int argc, char *argv[]) {
     KernelMap kernel_map_result = perform_coordinate_lookup(
         unique_indexed_coords, query_data.qry_keys, query_data.qry_in_idx, 
         query_data.qry_off_idx, query_data.wt_offsets, // wt_offsets from query_data
-        tiles_pivots_data.tiles, tiles_pivots_data.pivots, 2 // tile_size = 2
+        tiles_pivots_data.tiles, tiles_pivots_data.pivots, g_config.NUM_PIVOTS // tile_size = 2
     );
     curr_phase = ""; // Clear phase
 

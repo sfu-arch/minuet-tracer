@@ -38,8 +38,10 @@ struct MinuetConfig {
     int BULK_FEATS;
     int N_THREADS_GATHER;
     int TOTAL_FEATS_PT; // Calculated: NUM_TILES * TILE_FEATS
+
     bool debug; // Added for debug flag
     std::string output_dir; // Added for output directory
+    int NUM_PIVOTS; // Added NUM_PIVOTS
 
     MinuetConfig(); // Constructor for default values
 
