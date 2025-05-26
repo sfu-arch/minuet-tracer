@@ -177,9 +177,11 @@ def main():
     # Convert C++ kmap to Python-expected kmap format for gather/scatter
     # Create a mapping from original Python offset tuples to their indices
     offset_tuple_to_idx = {tuple_val: i for i, tuple_val in enumerate(offset_coords_tuples_raw)}
-    
-    py_kmap_for_gather = kernel_map_result_cpp_cpp.items()
 
+    py_kmap_for_gather = {}
+    for offset_key_int, matches_list in kernel_map_result_cpp.items():
+            py_kmap_for_gather[offset_key_int] = [(p[0], p[1]) for p in matches_list]
+        
     # Sort py_kmap_for_gather by length of matches for greedy_group (if it doesn't do it internally)
     # The original Python kmap was a SortedByValueLengthDict.
     # For greedy_group, we need offsets_active and slot_array.
