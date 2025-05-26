@@ -53,7 +53,7 @@ class IndexedCoord:
 
 def addr_to_tensor(addr):
     global curr_phase
-    print(curr_phase)
+    # print(curr_phase)
     """Convert address to tensor name."""
     if addr >= I_BASE and addr < QK_BASE:
         return TENSORS['I']
@@ -73,7 +73,25 @@ def addr_to_tensor(addr):
         assert(False), f"Unknown address: {addr}"
         return 'Unknown'
 
-
+def addr_to_tensor_str(addr):
+    """Convert address to tensor name."""
+    if addr >= I_BASE and addr < QK_BASE:
+        return 'I'
+    elif addr >= QK_BASE and addr < QI_BASE:
+        return TENSORS['QK']
+    elif addr >= QI_BASE and addr < QO_BASE:
+        return TENSORS['QI']
+    elif addr >= QO_BASE and addr < PIV_BASE:
+        return TENSORS['QO']
+    elif addr >= PIV_BASE and addr < KM_BASE:
+        return TENSORS['PIV']
+    elif addr >= KM_BASE and addr < WO_BASE:
+        return TENSORS['KM']
+    elif addr >= WO_BASE and addr < WV_BASE:
+        return TENSORS['WO']
+    else:
+        assert(False), f"Unknown address: {addr}"
+        return 'Unknown'
     
 
 def write_gmem_trace(filename):

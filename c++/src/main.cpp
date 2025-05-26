@@ -4,50 +4,75 @@
 #include <string>
 #include <algorithm> 
 #include <numeric> // For std::iota if needed, not directly here
+#include <filesystem> // For create_directory
+
+// Helper to convert vector of tuples to vector of Coord3D
+std::vector<Coord3D> tuples_to_coords(const std::vector<std::tuple<int, int, int>>& tuples) {
+    std::vector<Coord3D> coords_vec;
+    coords_vec.reserve(tuples.size());
+    for (const auto& t : tuples) {
+        coords_vec.emplace_back(std::get<0>(t), std::get<1>(t), std::get<2>(t));
+    }
+    return coords_vec;
+}
+
+// Forward declare to_hex_string if it's defined in minuet_trace.cpp and used here
+// If it's a local helper, it should be defined or declared before use in main.cpp as well.
+// Assuming it's in minuet_trace.cpp and accessible globally or via hpp.
+// If not, it needs to be added to minuet_trace.hpp or defined statically in main.cpp.
+// For now, let's assume it's available through includes.
+std::string to_hex_string(uint64_t val); // Declaration if defined elsewhere like minuet_trace.cpp
 
 int main() {
     // --- Initial Data Setup (matches Python script's example) ---
-    std::vector<std::tuple<int, int, int>> initial_coords_tuples = { // Renamed from coords
+    std::vector<std::tuple<int, int, int>> initial_coords_tuples_raw = { // Renamed from coords
         {1, 5, 0}, {0, 0, 2}, {0, 1, 1}, {0, 0, 3}
     };
+    std::vector<Coord3D> initial_coords = tuples_to_coords(initial_coords_tuples_raw);
+
     int stride = 1;
-    std::vector<std::tuple<int, int, int>> offset_coords_tuples; // Renamed from offsets
+    std::vector<std::tuple<int, int, int>> offset_coords_tuples_raw; // Renamed from offsets
     for (int dx = -1; dx <= 1; ++dx) {
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dz = -1; dz <= 1; ++dz) {
-                offset_coords_tuples.emplace_back(dx, dy, dz);
+                offset_coords_tuples_raw.emplace_back(dx, dy, dz);
             }
         }
     }
+    std::vector<Coord3D> offset_coords = tuples_to_coords(offset_coords_tuples_raw);
 
     // --- Phase 1: Radix Sort (Unique Sorted Input Coords with Original Indices) ---
-    curr_phase = "Radix-Sort"; // Updated global variable name
-    std::cout << "\n--- Phase: " << curr_phase << " with " << NUM_THREADS << " threads ---" << std::endl;
-    std::vector<IndexedCoord> unique_indexed_coords = compute_unique_sorted_coords(initial_coords_tuples, stride);
+    // Python: curr_phase = PHASES['RDX']
+    // C++: curr_phase is set within compute_unique_sorted_coords
+    std::cout << "\n--- Phase: " << PHASES.inverse.at(0) << " with " << NUM_THREADS << " threads ---" << std::endl;
+    std::vector<IndexedCoord> unique_indexed_coords = compute_unique_sorted_coords(initial_coords, stride);
 
     // --- Phase 2: Build Queries ---
-    curr_phase = "Build-Queries";
-    std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
-    BuildQueriesResult query_data = build_coordinate_queries(unique_indexed_coords, stride, offset_coords_tuples);
+    // Python: curr_phase = PHASES['QRY']
+    // C++: curr_phase is set within build_coordinate_queries
+    std::cout << "--- Phase: " << PHASES.inverse.at(1) << " ---" << std::endl;
+    BuildQueriesResult query_data = build_coordinate_queries(unique_indexed_coords, stride, offset_coords);
 
     // --- Phase 3: Sort Query Keys ---
-    curr_phase = "Sort-QKeys";
+    curr_phase = PHASES.inverse.at(2); // "SRT"
     std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
     // No actual sorting of qry_keys in this phase as per Python logic.
     // qry_keys from query_data is used directly.
 
     // --- Phase 4: Tile and Pivot Generation ---
-    curr_phase = "Tile-Pivots";
-    std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
-    TilesPivotsResult tiles_pivots_data = create_tiles_and_pivots(unique_indexed_coords, I_TILES);
+    // Python: curr_phase = PHASES['PVT']
+    // C++: curr_phase is set within create_tiles_and_pivots
+    std::cout << "--- Phase: " << PHASES.inverse.at(3) << " ---" << std::endl;
+    TilesPivotsResult tiles_pivots_data = create_tiles_and_pivots(unique_indexed_coords, 2); // Python example uses tile_size = 2
 
     // --- Phase 5: Lookup ---
-    curr_phase = "Lookup";
-    std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
+    // Python: curr_phase = PHASES['LKP']
+    // C++: curr_phase is set within perform_coordinate_lookup
+    std::cout << "--- Phase: " << PHASES.inverse.at(4) << " ---" << std::endl;
     KernelMap kernel_map_result = perform_coordinate_lookup(
         unique_indexed_coords, query_data.qry_keys, query_data.qry_in_idx, 
-        query_data.qry_off_idx, query_data.wt_offsets,
-        tiles_pivots_data.tiles, tiles_pivots_data.pivots, I_TILES
+        query_data.qry_off_idx, query_data.wt_offsets, // wt_offsets from query_data
+        tiles_pivots_data.tiles, tiles_pivots_data.pivots, 2 // tile_size = 2
     );
     curr_phase = ""; // Clear phase
 
@@ -55,13 +80,13 @@ int main() {
     if (debug) {
         std::cout << "\nSorted Source Array (Coordinate, Original Index):" << std::endl;
         for (const auto& idxc_item : unique_indexed_coords) {
-            std::cout << "  key=" << to_hex_string(idxc_item.coord.to_key())
+            std::cout << "  key=" << to_hex_string(idxc_item.to_key()) // Changed from idxc_item.coord.to_key()
                       << ", coords=" << idxc_item.coord // Uses Coord3D's operator<<
                       << ", index=" << idxc_item.orig_idx << std::endl;
         }
         
         std::cout << "\nQuery Segments:" << std::endl;
-        if (!query_data.qry_keys.empty() && !offset_coords_tuples.empty()) {
+        if (!query_data.qry_keys.empty() && !offset_coords.empty()) { // Changed offset_coords_tuples to offset_coords
             size_t num_unique_inputs = unique_indexed_coords.size();
              if (num_unique_inputs == 0 && query_data.qry_keys.empty()) { // Handle case with no inputs
                 std::cout << "  No unique inputs, so no query segments generated." << std::endl;
@@ -74,11 +99,11 @@ int main() {
                  std::cout << std::endl;
             }
             else {
-                for (size_t off_idx = 0; off_idx < offset_coords_tuples.size(); ++off_idx) {
-                    std::cout << "  Offset " << offset_coords_tuples[off_idx] << ": ";
+                for (size_t off_idx_print = 0; off_idx_print < offset_coords.size(); ++off_idx_print) {
+                    std::cout << "  Offset " << offset_coords[off_idx_print] << ": ";
                     bool first_in_segment = true;
                     for (size_t i = 0; i < num_unique_inputs; ++i) {
-                        size_t q_glob_idx = off_idx * num_unique_inputs + i;
+                        size_t q_glob_idx = off_idx_print * num_unique_inputs + i;
                         if (q_glob_idx < query_data.qry_keys.size()) {
                              if (!first_in_segment) std::cout << ", ";
                              std::cout << query_data.qry_keys[q_glob_idx].coord 
@@ -97,45 +122,51 @@ int main() {
         if (kernel_map_result.empty()) {
             std::cout << "  Kernel map is empty." << std::endl;
         }
-        for (const auto& pair : kernel_map_result) {
-            int off_idx = pair.first;
-            const auto& matches = pair.second;
-            if (!matches.empty()) {
-                 if (static_cast<size_t>(off_idx) < offset_coords_tuples.size()){
-                    std::cout << "  Offset " << offset_coords_tuples[off_idx] << " (idx " << off_idx << "):" << std::endl;
-                 } else {
-                    std::cout << "  Offset Index " << off_idx << " (original offset tuple unavailable):" << std::endl;
-                 }
-                for (const auto& match : matches) {
-                    // KernelMapMatch is std::pair<std::pair<std::tuple<int,int,int>, int>, std::pair<std::tuple<int,int,int>, int>>
-                    // ((target_coord_tuple, target_orig_idx), (source_coord_tuple, source_orig_idx))
-                    std::cout << "    Match: (Output: " << match.first.first << " [orig_idx:" << match.first.second << "])"
-                              << " -> (Input: " << match.second.first << " [orig_idx:" << match.second.second << "])"
-                              << std::endl;
+        for (const auto& kmap_pair : kernel_map_result) { // Renamed pair to kmap_pair
+            Coord3D offset_as_coord = Coord3D::from_signed_key(kmap_pair.first);
+            std::cout << "  Offset " << offset_as_coord << " (Key: " << to_hex_string(kmap_pair.first) << "):";
+            if (kmap_pair.second.empty()) {
+                std::cout << " No matches" << std::endl;
+            } else {
+                std::cout << std::endl;
+                size_t entries_to_show = kmap_pair.second.size(); // Define entries_to_show
+                for (size_t match_idx = 0; match_idx < entries_to_show; ++match_idx) {
+                    const auto& match_pair = kmap_pair.second[match_idx];
+                    std::cout << "    Match " << match_idx + 1
+                              << ": Input original_idx: " << match_pair.first
+                              << " -> Query source_original_idx: " << match_pair.second << std::endl;
                 }
             }
         }
     }
 
-    // --- Print Memory Trace and Write to File ---
-    std::cout << "\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl; // Use mem_trace
-    size_t entries_to_show = std::min(static_cast<size_t>(10), mem_trace.size());
-    for (size_t i = 0; i < entries_to_show; ++i) {
+    // --- Write Memory Trace and Kernel Map ---
+    std::cout << "\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl;
+    for (size_t i = 0; i < std::min(mem_trace.size(), static_cast<size_t>(10)); ++i) {
         const auto& e = mem_trace[i];
-        std::cout << "(\"" << e.phase << "\", " << e.thread_id << ", \"" << e.op
-                  << "\", \"" << e.tensor << "\", \"" << to_hex_string(e.addr) << "\")" << std::endl;
+        std::cout << "  Phase: " << e.phase << ", TID: " << e.thread_id 
+                  << ", Op: " << e.op << ", Tensor: " << e.tensor 
+                  << ", Addr: " << to_hex_string(e.addr) << std::endl;
     }
-    if (mem_trace.size() > entries_to_show) {
-        std::cout << "... and " << mem_trace.size() - entries_to_show << " more entries." << std::endl;
+    if (mem_trace.size() > 10) {
+        std::cout << "... and " << mem_trace.size() - 10 << " more entries" << std::endl;
+    }
+
+    // Create output directory if it doesn't exist
+    if (!std::filesystem::exists(output_dir)) {
+        std::filesystem::create_directories(output_dir);
+        std::cout << "Created output directory: " << output_dir << std::endl;
     }
 
     try {
-        write_gmem_trace("map_trace.bin.gz"); // Updated filename
-        write_kernel_map_to_gz(kernel_map_result, "kernel_map.bin.gz", offset_coords_tuples); // New function call
+        write_gmem_trace(output_dir + "map_trace.bin.gz");
+        write_kernel_map_to_gz(kernel_map_result, output_dir + "kernel_map.bin.gz", offset_coords);
     } catch (const std::exception& e) {
         std::cerr << "Error during file writing: " << e.what() << std::endl;
         return 1;
     }
+
+    std::cout << "\nC++ Minuet mapping trace generation complete." << std::endl;
 
     return 0;
 }

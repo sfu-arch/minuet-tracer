@@ -16,12 +16,20 @@ def read_trace(filename):
     try:
         with gzip.open(filename, 'rb') as f:
             # Read number of entries
-            num_entries = struct.unpack('I', f.read(4))[0]
-            print(f"Reading {num_entries} trace entries...")
+            num_entries_data = f.read(4)
+            if not num_entries_data:
+                print(f"Error: Trace file {filename} appears to be empty or corrupted (could not read num_entries).")
+                return []
+            num_entries = struct.unpack('I', num_entries_data)[0]
+            print(f"Reading {num_entries} trace entries from {filename}...")
             
             # Read each entry
-            for _ in range(num_entries):
-                entry = struct.unpack('BBBBI', f.read(8))  # Format is BBBBI
+            for i in range(num_entries):
+                entry_data = f.read(8)
+                if len(entry_data) < 8:
+                    print(f"Error: Trace file {filename} is truncated. Expected 8 bytes for entry {i+1}, got {len(entry_data)}.")
+                    break
+                entry = struct.unpack('BBBBI', entry_data)  # Format is BBBBI
                 phase_id, thread_id, op_id, tensor_id, addr = entry
                                 # Convert numeric IDs to strings
                 phase = PHASES.inverse[phase_id][0] if phase_id in PHASES.inverse else f"Unknown-{phase_id}"
@@ -36,6 +44,9 @@ def read_trace(filename):
                 })
         return entries
     
+    except gzip.BadGzipFile:
+        print(f"Error: File {filename} is not a valid GZIP file or is corrupted.")
+        return []
     except Exception as e:
         print(f"Error reading trace file: {e}")
         return []
@@ -49,7 +60,8 @@ def analyze_trace(entries):
     # Count operations by phase
     phase_ops = defaultdict(lambda: {'R': 0, 'W': 0})
     for entry in entries:  
-        print(entry['phase'], entry['op'])
+        print(entry)
+        # print(entry['phase'], entry['op'])
         phase_ops[entry['phase']][entry['op']] += 1
     
     # Count operations by tensor
@@ -58,10 +70,12 @@ def analyze_trace(entries):
         tensor_ops[entry['tensor']][entry['op']] += 1
     
     # Count operations by thread
+    thread_entries = defaultdict(list)
     thread_ops = defaultdict(lambda: {'R': 0, 'W': 0})
     for entry in entries:
         thread_ops[entry['thread_id']][entry['op']] += 1
-    
+        thread_entries[entry['thread_id']].append(entry)
+        
     # Print statistics
     print("\n===== Memory Trace Statistics =====")
     print(f"Total entries: {len(entries)}")
@@ -80,6 +94,11 @@ def analyze_trace(entries):
     for thread_id, ops in sorted(thread_ops.items()):
         total = ops['R'] + ops['W']
         print(f"Thread {thread_id}: {total} ops ({ops['R']} reads, {ops['W']} writes)")
+    print("\n--- Thread Entries ---")
+    for thread_id, entries in sorted(thread_entries.items()):
+        print(f"Thread {thread_id} has {len(entries)} entries:")
+        for entry in entries:
+            print(f"  {entry['phase']} - {entry['op']} - {entry['tensor']} - Addr: {entry['addr']}")
 
 def plot_memory_access_patterns(entries, output_file=None):
     """Plot memory access patterns from trace entries."""
@@ -120,34 +139,107 @@ def plot_memory_access_patterns(entries, output_file=None):
     else:
         plt.show()
 
+def diff_trace(file1_path, file2_path):
+    """Compare two trace files and print the differences."""
+    print(f"\n===== Diffing Trace Files =====")
+    print(f"File 1: {file1_path}")
+    print(f"File 2: {file2_path}")
+
+    entries1 = read_trace(file1_path)
+    entries2 = read_trace(file2_path)
+
+    if not entries1 and not entries2:
+        print("Both trace files are empty or could not be read.")
+        return
+    if not entries1:
+        print(f"Could not read entries from {file1_path} or it's empty.")
+        print(f"{file2_path} contains {len(entries2)} entries.")
+        # Optionally print all entries from file2 if desired
+        # for i, entry in enumerate(entries2):
+        #     print(f"  Entry {i} in {file2_path} (unique): {entry}")
+        return
+    if not entries2:
+        print(f"Could not read entries from {file2_path} or it's empty.")
+        print(f"{file1_path} contains {len(entries1)} entries.")
+        # Optionally print all entries from file1 if desired
+        # for i, entry in enumerate(entries1):
+        #     print(f"  Entry {i} in {file1_path} (unique): {entry}")
+        return
+
+    len1, len2 = len(entries1), len(entries2)
+    differences_found = False
+
+    if len1 != len2:
+        print(f"\nNumber of entries differ: File 1 has {len1}, File 2 has {len2}")
+        differences_found = True
+
+    common_len = min(len1, len2)
+    print(f"\nComparing the first {common_len} entries...")
+
+    for i in range(common_len):
+        entry1 = entries1[i]
+        entry2 = entries2[i]
+        if entry1 != entry2:
+            differences_found = True
+            print(f"\nDifference at entry index {i}:")
+            print(f"  File 1: {entry1}")
+            print(f"  File 2: {entry2}")
+            # Detailed field comparison
+            for key in entry1.keys():
+                if entry1.get(key) != entry2.get(key):
+                    print(f"    Field '{key}': '{entry1.get(key)}' (File 1) vs '{entry2.get(key)}' (File 2)")
+
+
+    if len1 > common_len:
+        print(f"\nEntries unique to File 1 (from index {common_len}):")
+        for i in range(common_len, len1):
+            differences_found = True
+            print(f"  Index {i}: {entries1[i]}")
+
+    if len2 > common_len:
+        print(f"\nEntries unique to File 2 (from index {common_len}):")
+        for i in range(common_len, len2):
+            differences_found = True
+            print(f"  Index {i}: {entries2[i]}")
+
+    if not differences_found:
+        print("\nNo differences found between the trace files (up to common length if sizes differ, or full if same size).")
+    else:
+        print("\n===== End of Diff =====")
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Read and analyze minuet memory trace files')
-    parser.add_argument('--trace-file', help='Path to memory trace file')
-    parser.add_argument('--filter-phase', help='Filter by phase name')
-    parser.add_argument('--filter-op', choices=['R', 'W'], help='Filter by operation type')
-    parser.add_argument('--filter-tensor', help='Filter by tensor type')
-    parser.add_argument('--plot', action='store_true', help='Generate memory access plots')
-    parser.add_argument('--plot-file', help='Save plot to file instead of displaying')
+    parser = argparse.ArgumentParser(description='Read, analyze, and diff minuet memory trace files')
+    parser.add_argument('--trace-file', required=True, help='Path to memory trace file (file1 for diff)')
+    parser.add_argument('--diff-file2', help='Path to the second memory trace file for diff (file2 for diff)')
+    parser.add_argument('--filter-phase', help='Filter by phase name (only for single file analysis)')
+    parser.add_argument('--filter-op', choices=['R', 'W'], help='Filter by operation type (only for single file analysis)')
+    parser.add_argument('--filter-tensor', help='Filter by tensor type (only for single file analysis)')
+    parser.add_argument('--plot', action='store_true', help='Generate memory access plots (only for single file analysis)')
+    parser.add_argument('--plot-file', help='Save plot to file instead of displaying (only for single file analysis)')
     
     args = parser.parse_args()
     
-    # Read trace file
-    entries = read_trace(args.trace_file)
-    
-    # Apply filters if specified
-    if args.filter_phase:
-        entries = [e for e in entries if e['phase'] == args.filter_phase]
-    if args.filter_op:
-        entries = [e for e in entries if e['op'] == args.filter_op]
-    if args.filter_tensor:
-        entries = [e for e in entries if e['tensor'] == args.filter_tensor]
-    
-    # Print analysis
-    analyze_trace(entries)
-    
-    # Generate plots if requested
-    if args.plot:
-        plot_memory_access_patterns(entries, args.plot_file)
+    if args.diff_file2:
+        diff_trace(args.trace_file, args.diff_file2)
+    else:
+        # Read trace file for single file analysis
+        entries = read_trace(args.trace_file)
+        
+        # Apply filters if specified
+        if args.filter_phase:
+            entries = [e for e in entries if e['phase'] == args.filter_phase]
+        if args.filter_op:
+            entries = [e for e in entries if e['op'] == args.filter_op]
+        if args.filter_tensor:
+            entries = [e for e in entries if e['tensor'] == args.filter_tensor]
+        
+        # Print analysis
+        analyze_trace(entries)
+        
+        # Generate plots if requested
+        if args.plot:
+            plot_memory_access_patterns(entries, args.plot_file)
 
 if __name__ == '__main__':
     main()
