@@ -194,9 +194,10 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     }, py::return_value_policy::reference); // Expose as a const reference
 
     // Bind functions
-    m.def("addr_to_tensor", &addr_to_tensor, py::arg("addr"));
+    // m.def("addr_to_tensor", &addr_to_tensor, py::arg("addr")); // Internal, not typically bound
     m.def("record_access", &record_access, py::arg("thread_id"), py::arg("op"), py::arg("addr"));
-    m.def("write_gmem_trace", &write_gmem_trace, py::arg("filename"));
+    m.def("write_gmem_trace", &write_gmem_trace, py::arg("filename"),
+          "Writes the memory trace to a gzipped file and returns its CRC32 checksum.");
     
     m.def("compute_unique_sorted_coords", &compute_unique_sorted_coords, 
           py::arg("in_coords"), py::arg("stride"));
@@ -210,11 +211,12 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     m.def("perform_coordinate_lookup", &perform_coordinate_lookup,
           py::arg("uniq_coords"), py::arg("qry_keys"), py::arg("qry_in_idx"),
           py::arg("qry_off_idx"), py::arg("wt_offsets"), py::arg("tiles"),
-          py::arg("pivs"), py::arg("tile_size"),
+          py::arg("pivs"), py::arg("num_tiles_config"), // Corrected arg name to match C++
           py::return_value_policy::move); // KernelMapType is returned by value
 
     m.def("write_kernel_map_to_gz", &write_kernel_map_to_gz,
-          py::arg("kmap_data"), py::arg("filename"), py::arg("off_list"));
+          py::arg("kmap_data"), py::arg("filename"), py::arg("off_list"),
+          "Writes the kernel map to a gzipped file and returns its CRC32 checksum.");
 
     // // Bind Minuet Gather Structs
     // py::class_<GroupInfo>(m, "GroupInfo")
@@ -226,37 +228,37 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
 
     // py::class_<GemmEntry>(m, "GemmEntry")
     //     .def(py::init<>())
-    //     .def_readwrite("num_offsets", &GemmEntry::num_offsets) // Corrected field name
-    //     .def_readwrite("gemm_M", &GemmEntry::gemm_M) // Corrected field name
-    //     .def_readwrite("len_inputs", &GemmEntry::len_inputs) // Corrected field name
-    //     .def_readwrite("len_outputs", &GemmEntry::len_outputs) // Corrected field name
+    //     .def_readwrite("num_offsets", &GemmEntry::num_offsets)
+    //     .def_readwrite("gemm_M", &GemmEntry::gemm_M)
+    //     .def_readwrite("len_inputs", &GemmEntry::len_inputs)
+    //     .def_readwrite("len_outputs", &GemmEntry::len_outputs)
     //     .def_readwrite("padding", &GemmEntry::padding)
-    //     .def_readwrite("offsets_data", &GemmEntry::offsets_data) // Corrected field name
-    //     .def_readwrite("inputs_data", &GemmEntry::inputs_data) // Corrected field name
-    //     .def_readwrite("outputs_data", &GemmEntry::outputs_data); // Corrected field name
+    //     .def_readwrite("offsets_data_indices", &GemmEntry::offsets_data_indices) // Field name in C++ struct
+    //     .def_readwrite("inputs_data_indices", &GemmEntry::inputs_data_indices)   // Field name in C++ struct
+    //     .def_readwrite("outputs_data_indices", &GemmEntry::outputs_data_indices); // Field name in C++ struct
 
     // // Bind Minuet Gather Functions
     // // Ensure argument names in lambda match C++ function for clarity, though not strictly necessary for pybind
     // m.def("create_slot_array_cpp", &create_slot_array_cpp,
-    //       py::arg("kernel_map")); // Corrected: takes KernelMapType
+    //       py::arg("kernel_map"));
 
     // // Binding for create_in_out_masks_cpp
     // // The C++ function returns std::pair<std::vector<int>, std::vector<int>>
     // // pybind11 automatically converts this to a Python tuple of lists.
     // m.def("create_in_out_masks_cpp", &create_in_out_masks_cpp,
     //       py::arg("kernel_map"), 
-    //       py::arg("slot_dict"), 
+    //       py::arg("slot_dict"), // This is std::map<uint32_t, int> in C++
     //       py::arg("num_total_offsets"), 
     //       py::arg("num_total_sources"));
 
     // // Binding for greedy_group_cpp
-    // // The C++ function returns std::tuple<std::vector<int>, std::vector<GroupInfo>, std::vector<GemmEntry>>
+    // // The C++ function returns std::tuple<std::vector<int>, std::vector<GroupInfo>, std::vector<GemmEntry>, int, uint32_t>
     // // pybind11 automatically converts this to a Python tuple.
     // // The last argument max_slots_opt is std::optional<int>. Pybind11 handles optional automatically.
     // m.def("greedy_group_cpp", &greedy_group_cpp,
-    //       py::arg("idx_kmap"), 
-    //       py::arg("offsets_active"), 
-    //       py::arg("slots"), 
+    //       py::arg("idx_kmap"), // This is KernelMapType in C++
+    //       py::arg("offsets_active"), // std::vector<uint32_t>
+    //       py::arg("slots"), // std::vector<int>
     //       py::arg("alignment"), 
     //       py::arg("max_group"), 
     //       py::arg("max_slots_opt") = std::nullopt); // Provide default for optional

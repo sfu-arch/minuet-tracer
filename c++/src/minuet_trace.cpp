@@ -106,7 +106,7 @@ std::string addr_to_tensor(uint64_t addr) { // Renamed
   return "Unknown"; // Default if no range matches
 }
 
-void write_gmem_trace(const std::string &filename) {
+uint32_t write_gmem_trace(const std::string &filename) {
   // Create mappings for strings to integers (already done by bidict)
   std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t, uint32_t>>
       compressed_trace_data;
@@ -118,18 +118,14 @@ void write_gmem_trace(const std::string &filename) {
     try {
       tensor_id = TENSORS.at_key(entry.tensor);
     } catch (const std::out_of_range &oor) {
-      // Handle tensors like "IV", "WV", "Unknown" that are not in the TENSORS
-      // bidict For simplicity, assign a placeholder or extend TENSORS if these
-      // are common
       if (entry.tensor == "IV")
-        tensor_id = 99; // Example placeholder
+        tensor_id = 99; 
       else if (entry.tensor == "WV")
         tensor_id = 98;
       else
-        tensor_id = 255; // Placeholder for "Unknown"
+        tensor_id = 255; 
     }
-    uint32_t addr_int = static_cast<uint32_t>(
-        entry.addr); // Python converts hex string from trace
+    uint32_t addr_int = static_cast<uint32_t>(entry.addr); 
 
     compressed_trace_data.emplace_back(phase_id,
                                        static_cast<uint8_t>(entry.thread_id),
@@ -141,12 +137,21 @@ void write_gmem_trace(const std::string &filename) {
     throw std::runtime_error("Failed to open file for writing: " + filename);
   }
 
+  uLong crc = crc32(0L, Z_NULL, 0);
+  auto write_and_crc = [&](const void* data, unsigned int len) {
+      if (gzwrite(outFile, data, len) != static_cast<int>(len)) {
+          gzclose(outFile);
+          throw std::runtime_error("Failed to write data to gzip file during gmem trace.");
+      }
+      crc = crc32(crc, static_cast<const Bytef*>(data), len);
+  };
+
   uint32_t num_entries = static_cast<uint32_t>(compressed_trace_data.size());
-  if (gzwrite(outFile, &num_entries, sizeof(num_entries)) !=
-      sizeof(num_entries)) {
-    gzclose(outFile);
-    throw std::runtime_error("Failed to write number of entries to gzip file.");
-  }
+  // if (gzwrite(outFile, &num_entries, sizeof(num_entries)) != sizeof(num_entries)) {
+  //   gzclose(outFile);
+  //   throw std::runtime_error("Failed to write number of entries to gzip file.");
+  // }
+  write_and_crc(&num_entries, sizeof(num_entries));
 
   for (const auto &centry : compressed_trace_data) {
     uint8_t phase_val = std::get<0>(centry);
@@ -154,25 +159,25 @@ void write_gmem_trace(const std::string &filename) {
     uint8_t op_val = std::get<2>(centry);
     uint8_t tensor_val = std::get<3>(centry);
     uint32_t addr_val = std::get<4>(centry);
-    if (gzwrite(outFile, &phase_val, sizeof(phase_val)) != sizeof(phase_val) ||
-        gzwrite(outFile, &tid_val, sizeof(tid_val)) != sizeof(tid_val) ||
-        gzwrite(outFile, &op_val, sizeof(op_val)) != sizeof(op_val) ||
-        gzwrite(outFile, &tensor_val, sizeof(tensor_val)) !=
-            sizeof(tensor_val) ||
-        gzwrite(outFile, &addr_val, sizeof(addr_val)) != sizeof(addr_val)) {
-      gzclose(outFile);
-      throw std::runtime_error("Failed to write entry to gzip file.");
-    }
+    // if (gzwrite(outFile, &phase_val, sizeof(phase_val)) != sizeof(phase_val) ||
+    //     gzwrite(outFile, &tid_val, sizeof(tid_val)) != sizeof(tid_val) ||
+    //     gzwrite(outFile, &op_val, sizeof(op_val)) != sizeof(op_val) ||
+    //     gzwrite(outFile, &tensor_val, sizeof(tensor_val)) != sizeof(tensor_val) ||
+    //     gzwrite(outFile, &addr_val, sizeof(addr_val)) != sizeof(addr_val)) {
+    //   gzclose(outFile);
+    //   throw std::runtime_error("Failed to write entry to gzip file.");
+    // }
+    write_and_crc(&phase_val, sizeof(phase_val));
+    write_and_crc(&tid_val, sizeof(tid_val));
+    write_and_crc(&op_val, sizeof(op_val));
+    write_and_crc(&tensor_val, sizeof(tensor_val));
+    write_and_crc(&addr_val, sizeof(addr_val));
   }
   gzclose(outFile);
 
   std::cout << "Memory trace written to " << filename << std::endl;
-  std::cout << "Compressed " << mem_trace.size() << " entries"
-            << std::endl; // Use mem_trace
-  // The phase_map printout in Python is for the local map created in that
-  // function. Since we use a global PHASES bidict, we don't need to print a
-  // dynamic mapping here. If a dynamic mapping was truly needed (e.g. for new
-  // phases discovered at runtime), the logic would be different.
+  std::cout << "Compressed " << mem_trace.size() << " entries" << std::endl; 
+  return static_cast<uint32_t>(crc);
 }
 
 void record_access(int thread_id, const std::string &op, uint64_t addr) {
@@ -398,25 +403,37 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
       // Python: record_access(i % NUM_THREADS, 'W', TILE_BASE + i * SIZE_KEY)
       // TILE_BASE is an alias for I_BASE. This implies an in-place usage or
       // conceptual copy. record_access(static_cast<int>(i % NUM_THREADS),
-      // OPS.inverse.at(1), g_config.TILE_BASE + i * g_config.SIZE_KEY); // "W"
+      // OPS.inverse.at(1), g_config.I_BASE + i * g_config.SIZE_KEY); // "W"
+      // (Simulated write to tile)
     }
     result.tiles.push_back(current_tile);
 
-    // Add pivot: the first element of the tile
-    // Python: record_access(start % NUM_THREADS, 'R', I_BASE + start *
-    // SIZE_KEY) record_access(static_cast<int>(start % NUM_THREADS),
-    // OPS.inverse.at(0), g_config.I_BASE + start * g_config.SIZE_KEY); // "R" for pivot
-    result.pivots.push_back(uniq_coords[start]);
-    // Write pivot key
-    // Python: record_access( (start // tile_size) % NUM_THREADS, 'W', PIV_BASE
-    // + (start // tile_size) * SIZE_KEY)
-    record_access(static_cast<int>((start / current_tile_size) % g_config.NUM_THREADS),
-                  OPS.inverse.at(1),
-                  g_config.PIV_BASE + (start / current_tile_size) * g_config.SIZE_KEY); // "W"
+    // Pivot selection (simplified: first element of the tile)
+    if (!current_tile.empty()) {
+      result.pivots.push_back(current_tile[0]);
+      // Write pivot to PIV_BASE (simulated)
+      // Python: record_access(start % NUM_THREADS, 'W', PIV_BASE + (result.pivots.size()-1) * SIZE_KEY)
+      // record_access(static_cast<int>(start % NUM_THREADS), OPS.inverse.at(1),
+      //               g_config.PIV_BASE + (result.pivots.size() - 1) * g_config.SIZE_KEY); // "W"
+    }
+  }
+
+  if (g_config.debug) {
+    std::cout << "Created " << result.tiles.size() << " tiles and "
+              << result.pivots.size() << " pivots." << std::endl;
+    // for (size_t i = 0; i < result.tiles.size(); ++i) {
+    //     std::cout << "  Tile " << i << " (size " << result.tiles[i].size() << "): ";
+    //     for (const auto& ic : result.tiles[i]) {
+    //         std::cout << ic.coord << " (orig_idx " << ic.orig_idx << "), ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+    // for (size_t i = 0; i < result.pivots.size(); ++i) {
+    //     std::cout << "  Pivot " << i << ": " << result.pivots[i].coord << " (orig_idx " << result.pivots[i].orig_idx << ")" << std::endl;
+    // }
   }
   return result;
 }
-
 KernelMapType perform_coordinate_lookup( // Renamed from lookup
     const std::vector<IndexedCoord> &uniq_coords,
     const std::vector<IndexedCoord> &qry_keys,
@@ -549,7 +566,7 @@ KernelMapType perform_coordinate_lookup( // Renamed from lookup
   return kmap;
 }
 
-void write_kernel_map_to_gz(
+uint32_t write_kernel_map_to_gz(
     const KernelMapType &kmap_data, const std::string &filename,
     const std::vector<Coord3D>
         &off_list 
@@ -559,18 +576,28 @@ void write_kernel_map_to_gz(
     throw std::runtime_error("Failed to open file for writing: " + filename);
   }
 
+  uLong crc = crc32(0L, Z_NULL, 0);
+  auto write_and_crc = [&](const void* data, unsigned int len) {
+      if (gzwrite(outFile, data, len) != static_cast<int>(len)) {
+          gzclose(outFile);
+          throw std::runtime_error("Failed to write data to gzip file during kernel map writing.");
+      }
+      crc = crc32(crc, static_cast<const Bytef*>(data), len);
+  };
+
   // Calculate total number of entries (pairs) across all offsets
   uint32_t num_total_entries = 0;
   for (const auto &pair : kmap_data) {
     num_total_entries += static_cast<uint32_t>(pair.second.size());
   }
 
-  if (gzwrite(outFile, &num_total_entries, sizeof(num_total_entries)) !=
-      sizeof(num_total_entries)) {
-    gzclose(outFile);
-    throw std::runtime_error(
-        "Failed to write number of entries to kernel map gzip file.");
-  }
+  // if (gzwrite(outFile, &num_total_entries, sizeof(num_total_entries)) !=
+  //     sizeof(num_total_entries)) {
+  //   gzclose(outFile);
+  //   throw std::runtime_error(
+  //       "Failed to write number of entries to kernel map gzip file.");
+  // }
+  write_and_crc(&num_total_entries, sizeof(num_total_entries));
 
   // Iterate through the map (sorted by offset_idx due to std::map)
   // For SortedByValueSizeMap, we need to get the items in its sorted order if that's desired for writing.
@@ -598,20 +625,25 @@ void write_kernel_map_to_gz(
       uint32_t query_src_orig_idx = static_cast<uint32_t>(match.second);
 
       // Write: packed_offset_key_to_write, input_idx, query_src_orig_idx
-      if (gzwrite(outFile, &packed_offset_key_to_write, sizeof(packed_offset_key_to_write)) !=
-              sizeof(packed_offset_key_to_write) ||
-          gzwrite(outFile, &input_idx, sizeof(input_idx)) !=
-              sizeof(input_idx) ||
-          gzwrite(outFile, &query_src_orig_idx, sizeof(query_src_orig_idx)) !=
-              sizeof(query_src_orig_idx)) {
-        gzclose(outFile);
-        throw std::runtime_error(
-            "Failed to write kernel map entry to gzip file.");
-      }
+      // if (gzwrite(outFile, &packed_offset_key_to_write, sizeof(packed_offset_key_to_write)) !=
+      //         sizeof(packed_offset_key_to_write) ||
+      //     gzwrite(outFile, &input_idx, sizeof(input_idx)) !=
+      //         sizeof(input_idx) ||
+      //     gzwrite(outFile, &query_src_orig_idx, sizeof(query_src_orig_idx)) !=
+      //         sizeof(query_src_orig_idx)) {
+      //   gzclose(outFile);
+      //   throw std::runtime_error(
+      //       "Failed to write kernel map entry to gzip file.");
+      // }
+      write_and_crc(&packed_offset_key_to_write, sizeof(packed_offset_key_to_write));
+      write_and_crc(&input_idx, sizeof(input_idx));
+      write_and_crc(&query_src_orig_idx, sizeof(query_src_orig_idx));
     }
   }
 
   gzclose(outFile);
   std::cout << "Kernel map successfully written to " << filename << " with "
             << num_total_entries << " entries." << std::endl;
+
+            return static_cast<uint32_t>(crc);
 }

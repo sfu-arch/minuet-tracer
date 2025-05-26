@@ -96,24 +96,56 @@ extern bidict<std::string, int> TENSORS;
 extern bidict<std::string, int> OPS;
 
 // Helper function to convert value to hex string
+std::string to_hex_string(uint64_t val); // Forward declaration
 
-
-// --- Data Structures ---
-// Coord3D and IndexedCoord are now in coord.hpp
-
-// --- Global Memory Trace Setup ---
-struct MemoryAccessEntry {
+// --- Structs for function results (matching Python for clarity) ---
+struct MemoryAccessEntry { // Renamed from mem_trace_entry_t
     std::string phase;
     int thread_id;
     std::string op;
     std::string tensor;
     uint64_t addr;
+
+    // For pybind11, if you want to print it easily from Python or use __repr__
+    std::string toString() const {
+        std::ostringstream oss;
+        oss << "MemoryAccessEntry(phase=" << phase << ", thread_id=" << thread_id
+            << ", op=" << op << ", tensor=" << tensor << ", addr=" << to_hex_string(addr) << ")";
+        return oss.str();
+    }
 };
 
-extern std::vector<MemoryAccessEntry> mem_trace; // Updated name
-extern std::string curr_phase; // Added
-extern bool debug;             // Added
-extern const std::string output_dir; // Added
+struct BuildQueriesResult {
+    std::vector<IndexedCoord> qry_keys; // Vector of IndexedCoord (coord, original_source_idx)
+    std::vector<int> qry_in_idx;        // Index into unique_coords
+    std::vector<int> qry_off_idx;       // Index into offset_coords
+    std::vector<Coord3D> wt_offsets;    // The actual Coord3D offset used for the query
+};
+
+struct TilesPivotsResult {
+    std::vector<std::vector<IndexedCoord>> tiles;
+    std::vector<IndexedCoord> pivots;
+};
+
+// Using KernelMapType from sorted_map.hpp
+// using KernelMapType = SortedByValueSizeMap<uint32_t, std::vector<std::pair<int, int>>>;
+// This is defined in sorted_map.hpp which is included.
+
+struct PerformLookupResult {
+    // This is essentially the KernelMapType itself, but let's be explicit if Python side expects a struct
+    // For now, let's assume perform_coordinate_lookup directly returns KernelMapType
+    // If it needs to be wrapped:
+    // KernelMapType kernel_map;
+    // std::vector<uint32_t> offsets_active; // If C++ side also determines this
+    // std::vector<int> slot_array;          // If C++ side also determines this
+};
+
+
+// --- Global Memory Trace Setup ---
+// extern std::vector<MemoryAccessEntry> mem_trace; // Defined in .cpp
+// extern std::string curr_phase; // Defined in .cpp
+// extern bool debug; // Part of g_config
+// extern const std::string output_dir; // Part of g_config
 
 // --- Getter/Setter for global state and mem_trace management ---
 std::vector<MemoryAccessEntry> get_mem_trace();
@@ -133,7 +165,7 @@ bool get_debug_flag();
 // Memory tracing
 std::string addr_to_tensor(uint64_t addr);
 void record_access(int thread_id, const std::string& op, uint64_t addr); // op is "R" or "W"
-void write_gmem_trace(const std::string& filename);
+uint32_t write_gmem_trace(const std::string& filename); // Return checksum
 
 // Algorithm phases
 std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint64_t base_addr);
@@ -143,29 +175,16 @@ std::vector<IndexedCoord> compute_unique_sorted_coords(
     int stride
 );
 
-// Structure to hold results from build_coordinate_queries
-struct BuildQueriesResult {
-    std::vector<IndexedCoord> qry_keys; // Stores IndexedCoord(Coord3D_obj, original_index_from_input)
-    std::vector<int> qry_in_idx;
-    std::vector<int> qry_off_idx;
-    std::vector<Coord3D> wt_offsets; // Stores Coord3D for weight offsets
-};
-
 BuildQueriesResult build_coordinate_queries(
     const std::vector<IndexedCoord>& uniq_coords,
-    int stride, // stride is not used in python version, but kept for signature
-    const std::vector<Coord3D>& off_coords // Changed from tuples
+    int stride, 
+    const std::vector<Coord3D>& off_coords 
 );
 
 // Structure to hold results from create_tiles_and_pivots
-struct TilesPivotsResult {
-    std::vector<std::vector<IndexedCoord>> tiles;
-    std::vector<IndexedCoord> pivots; // Python uses 'pivs'
-};
-
 TilesPivotsResult create_tiles_and_pivots(
     const std::vector<IndexedCoord>& uniq_coords,
-    int tile_size
+    int tile_size_param // Renamed to avoid conflict with config
 );
 
 // Kernel Map type (matches Python's kmap structure)
@@ -193,10 +212,10 @@ KernelMapType perform_coordinate_lookup( // Renamed from lookup
     int tile_size
 );
 
-void write_kernel_map_to_gz(
-    const KernelMapType& kmap_data, // Changed KernelMap to KernelMapType
+uint32_t write_kernel_map_to_gz(
+    const KernelMapType& kernel_map,
     const std::string& filename,
-    const std::vector<Coord3D>& off_list // List of offset coordinates
+    const std::vector<Coord3D>& offset_coords
 );
 
 

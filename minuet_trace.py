@@ -117,6 +117,8 @@ if __name__ == '__main__':
 
     # Generate masks with global idx.
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
+    
+    print(out_mask, in_mask)
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")

@@ -66,8 +66,10 @@ int main(int argc, char *argv[]) {
     BuildQueriesResult query_data = build_coordinate_queries(unique_indexed_coords, stride, offset_coords);
 
     // --- Phase 3: Sort Query Keys ---
-    curr_phase = PHASES.inverse.at(2); // "SRT"
-    std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
+    // curr_phase = PHASES.inverse.at(2); // "SRT"
+    set_curr_phase(PHASES.inverse.at(2)); // "SRT"
+    // std::cout << "--- Phase: " << curr_phase << " ---" << std::endl;
+    std::cout << "--- Phase: " << get_curr_phase() << " ---" << std::endl;
     // No actual sorting of qry_keys in this phase as per Python logic.
     // qry_keys from query_data is used directly.
 
@@ -86,7 +88,8 @@ int main(int argc, char *argv[]) {
         query_data.qry_off_idx, query_data.wt_offsets, // wt_offsets from query_data
         tiles_pivots_data.tiles, tiles_pivots_data.pivots, g_config.NUM_PIVOTS // tile_size = 2
     );
-    curr_phase = ""; // Clear phase
+    // curr_phase = ""; // Clear phase
+    set_curr_phase(""); // Clear phase
 
     // --- Print Debug Information (if enabled) ---
     if (get_debug_flag()) { // Use get_debug_flag() which uses g_config.debug
@@ -153,15 +156,28 @@ int main(int argc, char *argv[]) {
     }
 
     // --- Write Memory Trace and Kernel Map ---
-    std::cout << "\\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl;
-    for (size_t i = 0; i < std::min(mem_trace.size(), static_cast<size_t>(10)); ++i) {
-        const auto& e = mem_trace[i];
+    // std::cout << "\\nMemory Trace Entries (" << mem_trace.size() << " total):" << std::endl;
+    // for (size_t i = 0; i < std::min(mem_trace.size(), static_cast<size_t>(10)); ++i) {
+    //     const auto& e = mem_trace[i];
+    //     std::cout << "  Phase: " << e.phase << ", TID: " << e.thread_id 
+    //               << ", Op: " << e.op << ", Tensor: " << e.tensor 
+    //               << ", Addr: " << to_hex_string(e.addr) << std::endl;
+    // }
+    // if (mem_trace.size() > 10) {
+    //     std::cout << "... and " << mem_trace.size() - 10 << " more entries" << std::endl;
+    // }
+
+    // Retrieve mem_trace using the getter
+    const auto& current_mem_trace = get_mem_trace();
+    std::cout << "\\nMemory Trace Entries (" << current_mem_trace.size() << " total):" << std::endl;
+    for (size_t i = 0; i < std::min(current_mem_trace.size(), static_cast<size_t>(10)); ++i) {
+        const auto& e = current_mem_trace[i];
         std::cout << "  Phase: " << e.phase << ", TID: " << e.thread_id 
                   << ", Op: " << e.op << ", Tensor: " << e.tensor 
                   << ", Addr: " << to_hex_string(e.addr) << std::endl;
     }
-    if (mem_trace.size() > 10) {
-        std::cout << "... and " << mem_trace.size() - 10 << " more entries" << std::endl;
+    if (current_mem_trace.size() > 10) {
+        std::cout << "... and " << current_mem_trace.size() - 10 << " more entries" << std::endl;
     }
 
     // Create output directory if it doesn't exist

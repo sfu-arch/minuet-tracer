@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import argparse # Added for command-line arguments
 import numpy as np # Added for gemm_buffer
 
 # Attempt to determine the build directory relative to this script
@@ -37,12 +38,26 @@ except ImportError as e:
     sys.exit(1)
 
 # --- Configuration Loading ---
-# Determine the path to config.json, assuming it's in the project root
-# (parent directory of the directory containing this script if this script is in c++)
-project_root_dir = os.path.abspath(os.path.join(script_dir, '..'))
-config_file_path = os.path.join(project_root_dir, "config.json")
+# Setup argument parser
+parser = argparse.ArgumentParser(description='Minuet Python Tracer Script')
+parser.add_argument('--config', type=str, help='Path to the configuration JSON file')
+args = parser.parse_args()
+
+# Determine the path to config.json
+if args.config:
+    config_file_path = args.config
+    print(f"Using configuration file from command line: {config_file_path}")
+else:
+    # Default behavior: try to find config.json in the project root
+    # (parent directory of the directory containing this script if this script is in c++)
+    script_dir_for_config = os.path.dirname(os.path.abspath(__file__))
+    project_root_dir_for_config = os.path.abspath(os.path.join(script_dir_for_config, '..'))
+    config_file_path = os.path.join(project_root_dir_for_config, "config.json")
+    print(f"Config file not provided via command line. Using default path: {config_file_path}")
 
 # Add project_root_dir to sys.path for Python utility modules like minuet_mapping
+# This needs to be defined before the try-except block for imports
+project_root_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if project_root_dir not in sys.path:
     sys.path.insert(0, project_root_dir) # Insert at high priority
     print(f"Added project root {project_root_dir} to sys.path for utility modules.")
@@ -70,7 +85,7 @@ try:
     # These Python-side configs might now be redundant if C++ config is the source of truth
     # Or they might be used for Python-specific parts of the script
     from minuet_mapping import PHASES as PY_PHASES, OPS as PY_OPS, TENSORS as PY_TENSORS #, output_dir as PY_output_dir, debug as PY_debug, NUM_THREADS as PY_NUM_THREADS, I_BASE as PY_I_BASE, TILE_BASE as PY_TILE_BASE, QK_BASE as PY_QK_BASE, QI_BASE as PY_QI_BASE, QO_BASE as PY_QO_BASE, PIV_BASE as PY_PIV_BASE, KM_BASE as PY_KM_BASE, WO_BASE as PY_WO_BASE, SIZE_KEY as PY_SIZE_KEY, SIZE_INT as PY_SIZE_INT
-    from minuet_gather import greedy_group, create_in_out_masks, compact_bar_chart # Assuming these are still Python
+    from minuet_gather import greedy_group, create_in_out_masks, compact_bar_chart, write_gemm_list # Assuming these are still Python
     # from minuet_config import GEMM_ALIGNMENT, GEMM_WT_GROUP, GEMM_SIZE, NUM_TILES, TILE_FEATS, BULK_FEATS, TOTAL_FEATS_PT
 except ImportError as e:
     print(f"Failed to import Minuet Python utility modules (minuet_mapping, etc.): {e}")
@@ -184,83 +199,70 @@ def main():
     map_trace_filename = os.path.join(current_output_dir, "map_trace_cpp.bin.gz")
     kernel_map_filename = os.path.join(current_output_dir, "kernel_map_cpp.bin.gz")
     
-    map_trace_checksum = -1 # Placeholder
+    map_trace_checksum_cpp = 0 # Initialize with a default value (e.g., 0 or -1)
+    kernel_map_checksum_cpp = 0 # Initialize
+
     try:
         print(f"Writing gmem trace to {map_trace_filename}")
-        minuet_cpp.write_gmem_trace(map_trace_filename)
-        # TODO: The C++ write_gmem_trace doesn't return a checksum.
-        # If checksum is needed, it has to be implemented or calculated separately.
+        map_trace_checksum_cpp = minuet_cpp.write_gmem_trace(map_trace_filename)
+        print(f"C++ calculated CRC32 for gmem trace: {hex(map_trace_checksum_cpp)}")
         
         print(f"Writing kernel map to {kernel_map_filename}")
-        minuet_cpp.write_kernel_map_to_gz(kernel_map_result_cpp, kernel_map_filename, offset_coords_cpp)
+        kernel_map_checksum_cpp = minuet_cpp.write_kernel_map_to_gz(kernel_map_result_cpp, kernel_map_filename, offset_coords_cpp)
+        print(f"C++ calculated CRC32 for kernel map: {hex(kernel_map_checksum_cpp)}")
+
     except Exception as e:
         print(f"Error during file writing: {e}")
         sys.exit(1)
 
     print("\nC++ Minuet mapping trace generation (via Python) complete.")
 
-    ####################### Phase 2 Gather/Scatter (Python side) #######################
-    # The kmap from C++ (kernel_map_result_cpp) is a dict-like object.
-    # The Python gather/scatter code expects a specific kmap structure.
-    # We need to ensure compatibility or adapt.
-    # minuet_gather.greedy_group expects kmap to be a dict where keys are offset_indices (0, 1, ...)
-    # and values are lists of (input_idx, query_src_orig_idx)
-    # The C++ kmap has offset_key (packed Coord3D) as keys.
-
-    # py_kmap_for_gather will be built directly from kernel_map_result_cpp
-    # kernel_map_result_cpp is already sorted by the C++ SortedByValueSizeMap logic.
-    # The Python greedy_group expects keys to be offset indices if it does its own sorting,
-    # but if we provide offsets_active and slot_array pre-sorted, it should work with uint32_t keys.
-    # Let's ensure py_kmap_for_gather uses the same uint32_t keys from kernel_map_result_cpp.
-
-    py_kmap_for_gather = {}
-    # The .items() from the bound C++ map should respect the C++ map's order.
-    for offset_key_int, matches_list in kernel_map_result_cpp.items():
-        # matches_list is a list of std::pair<int, int> from C++,
-        # convert to list of Python tuples [(int, int), ...]
-        py_kmap_for_gather[offset_key_int] = [(p[0], p[1]) for p in matches_list]
-        
-    # Create offsets_active and slot_array based on the order from kernel_map_result_cpp.items()
-    # This order is: by number of matches (descending), then by offset_key_int (ascending).
+    ####################### Phase 2 Gather/Scatter (Python side) 
     offsets_active = []
     slot_array = []
-    for offset_key_int, matches_list in py_kmap_for_gather.items(): # py_kmap_for_gather will be ordered if kernel_map_result_cpp.items() is
-        if matches_list: # Only include if there are matches
+    # The .items() from the bound C++ map (kernel_map_result_cpp) 
+    # should respect the C++ map's iteration order.
+    for offset_key_int, matches_list in kernel_map_result_cpp.items():
+        # matches_list is a list of std::pair<int, int> from C++ (bound as list of pair-like objects)
+        if matches_list: # Only include if there are matches (i.e., list is not empty)
             offsets_active.append(offset_key_int)
             slot_array.append(len(matches_list))
-
-    # No explicit sort needed here if kernel_map_result_cpp.items() gives the desired order.
-    # The original Python code sorted a dictionary. Here, py_kmap_for_gather is built
-    # in the order provided by kernel_map_result_cpp.items().
-
+        
     print("\\n--- Phase: Gather/Scatter Metadata (Python using C++ KMap order) ---")
     if cpp_global_config.debug: 
         print("Offsets active (derived from C++ KernelMapType iteration order):")
         for o_idx, o_key in enumerate(offsets_active):
-            print(f"  [{o_idx}] {hex(o_key)} (Matches: {len(py_kmap_for_gather[o_key])})")
+            # Accessing kernel_map_result_cpp[o_key] to get length for debug print
+            print(f"  [{o_idx}] {hex(o_key)} (Matches: {len(kernel_map_result_cpp[o_key])})")
         print("Slot array (derived from C++ KernelMapType iteration order):", slot_array)
 
     # Python's greedy_group and create_in_out_masks will be used.
-    # They need py_kmap_for_gather, offsets_active, and slot_array.
-    slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
-        py_kmap_for_gather,
+    # They need the kmap (now kernel_map_result_cpp), offsets_active, and slot_array.
+    # The values in kernel_map_result_cpp are lists of C++ pair-like objects,
+    # which should be usable by the Python functions if they access elements via indexing (e.g., pair[0], pair[1]).
+    slot_indices, groups, membership, gemm_list, total_slots = greedy_group(
+        kernel_map_result_cpp, # Use kernel_map_result_cpp directly
         offsets_active,
         slot_array,
         alignment=cpp_global_config.GEMM_ALIGNMENT,
         max_group=cpp_global_config.GEMM_WT_GROUP,
-        max_slots=cpp_global_config.GEMM_SIZE,
+        max_slots=cpp_global_config.GEMM_SIZE
     )
+    gemm_checksum = write_gemm_list(gemm_list, cpp_global_config.output_dir + "gemms.bin.gz")
+
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
 
     # Generate masks with global idx.
     # For create_in_out_masks, uniq_coords_count is len(unique_indexed_coords_cpp)
     # total_num_offsets is len(offset_coords_tuples_raw)
     out_mask, in_mask = create_in_out_masks(
-        py_kmap_for_gather, 
+        kernel_map_result_cpp, # Use kernel_map_result_cpp directly
         slot_dict, 
         len(offset_coords_tuples_raw), 
         len(unique_indexed_coords_cpp)
     )
+    
+    print(out_mask, in_mask) # Debug print of masks
     
     print(f"Buffer size: {total_slots}")
     gemm_buffer = np.zeros(total_slots * cpp_global_config.TOTAL_FEATS_PT, dtype=np.uint16) # Use config
@@ -292,9 +294,10 @@ def main():
 
     # Write all checksums to file as json
     checksums = {
-        "map_trace_cpp.bin.gz": map_trace_checksum, # This is -1 currently
+        "map_trace_cpp.bin": hex(map_trace_checksum_cpp), # Use checksum from C++
         # "metadata.bin.gz": metadata_checksum, # If you generate and write this
-        "gemms_cpp.bin.gz": gemm_checksum, # This checksum is from Python's greedy_group
+        "kernel_map_cpp.bin": hex(kernel_map_checksum_cpp), # Use checksum from C++
+        "gemms.bin.gz": hex(gemm_checksum), # This checksum is from Python's greedy_group
     }
     
     checksum_filename = os.path.join(current_output_dir, 'checksums_cpp.json')
