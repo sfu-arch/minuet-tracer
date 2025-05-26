@@ -16,6 +16,31 @@ std::string curr_phase = "";              // Updated name
 bool debug = false; // Changed from true to false to match python default
 const std::string output_dir = "out/"; // Added
 
+// --- Getter/Setter for global state and mem_trace management ---
+std::vector<MemoryAccessEntry> get_mem_trace() {
+    return mem_trace;
+}
+
+void clear_mem_trace() {
+    mem_trace.clear();
+}
+
+void set_curr_phase(const std::string& phase_name) {
+    curr_phase = phase_name;
+}
+
+std::string get_curr_phase() {
+    return curr_phase;
+}
+
+void set_debug_flag(bool debug_val) {
+    debug = debug_val;
+}
+
+bool get_debug_flag() {
+    return debug;
+}
+
 // Global constant maps (matching Python names for clarity)
 // Using the bidict class defined in the header
 bidict<std::string, int>
@@ -566,9 +591,8 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
     if (found_uc_idx != -1 &&
         found_uc_idx < static_cast<int>(uniq_coords.size())) {
       // Match found
-      uint32_t offset_coord_key = wt_offsets[current_offset_idx].to_key();
 
-      kmap[offset_coord_key].emplace_back(uniq_coords[found_uc_idx].orig_idx,
+      kmap[current_offset_idx].emplace_back(uniq_coords[found_uc_idx].orig_idx,
                                           query_original_src_idx);
 
       // Record write to kernel map (Python: KM_BASE + kmap_write_idx *
@@ -584,7 +608,7 @@ KernelMap perform_coordinate_lookup( // Renamed from lookup
 void write_kernel_map_to_gz(
     const KernelMap &kmap_data, const std::string &filename,
     const std::vector<Coord3D>
-        &off_list // Unused in current C++ impl, but in Python sig
+        &off_list 
 ) {
   gzFile outFile = gzopen(filename.c_str(), "wb");
   if (!outFile) {
@@ -604,9 +628,19 @@ void write_kernel_map_to_gz(
         "Failed to write number of entries to kernel map gzip file.");
   }
 
-  // Iterate through the map (sorted by offset_key due to std::map)
+  // Iterate through the map (sorted by offset_idx due to std::map)
   for (const auto &pair : kmap_data) {
-    uint32_t offset_key = pair.first;
+    uint32_t offset_idx = pair.first; // This is the integer index for off_list
+
+    if (offset_idx >= off_list.size()) {
+        std::cerr << "Error in write_kernel_map_to_gz: offset_idx " << offset_idx 
+                  << " is out of bounds for off_list (size " << off_list.size() 
+                  << "). Skipping this kmap entry." << std::endl;
+        continue;
+    }
+    const Coord3D& actual_offset_coord = off_list[offset_idx];
+    uint32_t packed_offset_key_to_write = actual_offset_coord.to_key(); 
+
     const auto &matches =
         pair.second; // vector of (input_idx, query_src_orig_idx)
 
@@ -614,9 +648,9 @@ void write_kernel_map_to_gz(
       uint32_t input_idx = static_cast<uint32_t>(match.first);
       uint32_t query_src_orig_idx = static_cast<uint32_t>(match.second);
 
-      // Write: offset_key, input_idx, query_src_orig_idx
-      if (gzwrite(outFile, &offset_key, sizeof(offset_key)) !=
-              sizeof(offset_key) ||
+      // Write: packed_offset_key_to_write, input_idx, query_src_orig_idx
+      if (gzwrite(outFile, &packed_offset_key_to_write, sizeof(packed_offset_key_to_write)) !=
+              sizeof(packed_offset_key_to_write) ||
           gzwrite(outFile, &input_idx, sizeof(input_idx)) !=
               sizeof(input_idx) ||
           gzwrite(outFile, &query_src_orig_idx, sizeof(query_src_orig_idx)) !=

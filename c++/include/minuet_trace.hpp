@@ -181,6 +181,14 @@ extern std::string curr_phase; // Added
 extern bool debug;             // Added
 extern const std::string output_dir; // Added
 
+// --- Getter/Setter for global state and mem_trace management ---
+std::vector<MemoryAccessEntry> get_mem_trace();
+void clear_mem_trace();
+void set_curr_phase(const std::string& phase_name);
+std::string get_curr_phase();
+void set_debug_flag(bool debug_val);
+bool get_debug_flag();
+
 // --- Function Declarations (matching Python functions) ---
 
 // Helper: pack/unpack (already in .cpp, ensure signatures match if used directly)

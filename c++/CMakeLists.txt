@@ -10,21 +10,23 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED) 
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
-# Add the executable
-add_executable(minuet_trace_cpp
-    src/main.cpp
+
+# Add the pybind11 module
+# The first argument is the name of the module
+pybind11_add_module(minuet_cpp_module
     src/minuet_trace.cpp
+    src/minuet_bindings.cpp # Add the new bindings file
 )
 
 # Specify include directories
-# This allows #include "minuet_trace.hpp" to work from src/*.cpp
-target_include_directories(minuet_trace_cpp PUBLIC
+target_include_directories(minuet_cpp_module PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${ZLIB_INCLUDE_DIRS} # Add ZLIB include directory
+    ${pybind11_INCLUDE_DIRS} # Add pybind11 include directory
 )
 
 # Link necessary libraries
-target_link_libraries(minuet_trace_cpp PUBLIC
+target_link_libraries(minuet_cpp_module PUBLIC
     ${ZLIB_LIBRARIES}   # Link ZLIB
     Threads::Threads    # Link pthreads or equivalent for std::thread
 )
@@ -32,5 +34,19 @@ target_link_libraries(minuet_trace_cpp PUBLIC
 # Optional: Enable C++17 filesystem support if needed by the compiler/platform
 # (Not strictly necessary for this specific code but good practice for C++17 projects)
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.12")
-    target_compile_features(minuet_trace_cpp PUBLIC cxx_std_17)
+    target_compile_features(minuet_cpp_module PUBLIC cxx_std_17)
 endif()
+
+# Remove the old executable target if it exists, or comment it out
+add_executable(minuet_trace_cpp
+    src/main.cpp
+    src/minuet_trace.cpp
+)
+target_include_directories(minuet_trace_cpp PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${ZLIB_INCLUDE_DIRS}
+)
+target_link_libraries(minuet_trace_cpp PUBLIC
+    ${ZLIB_LIBRARIES}
+    Threads::Threads
+)
