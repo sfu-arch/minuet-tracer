@@ -19,10 +19,11 @@ if script_dir not in sys.path:
 
 # Try to import minuet_gather
 try:
-    from minuet_gather import read_metadata, file_checksum
+    from minuet_gather import read_metadata
+    from minuet_utils import file_checksum # Import file_checksum from minuet_utils
     from minuet_config import output_dir as default_output_dir # For default filename
 except ImportError as e:
-    print(f"Error importing Minuet modules (minuet_gather, minuet_config): {e}")
+    print(f"Error importing Minuet modules (minuet_gather, minuet_utils, minuet_config): {e}")
     print("Please ensure these Python files are in the same directory as metadata_reader.py, "
           "or accessible via PYTHONPATH.")
     sys.exit(1)

@@ -121,6 +121,7 @@ if __name__ == '__main__':
     gemm_buffer = np.zeros(total_slots*TOTAL_FEATS_PT, dtype=np.uint16)
    
     
+    
             
 
     # python_threaded_gather_simulation(
@@ -176,7 +177,27 @@ if __name__ == '__main__':
     compact_bar_chart(groups)
 
 
-
+    from minuet_gather import mt_gather
+    mt_gather(
+        num_threads=1,  # Updated parameter name
+        num_points=len(uniq_coords),
+        num_offsets = len(off_coords),
+        num_tiles_per_pt=minuet_config.NUM_TILES_GATHER,
+        tile_feat_size=minuet_config.TILE_FEATS_GATHER,
+        bulk_feat_size=minuet_config.BULK_FEATS_GATHER,
+        source_masks= in_mask,
+        sources=None,
+        gemm_buffers= gemm_buffer
+    )
+    
+        # Write memory trace to file
+    print('\nGather Memory Trace Entries:')
+    for e in mem_trace[:-1]:  # Show all entries except the last one
+        print(e)
+    print(f"... and {len(mem_trace)-10} more entries")
+    write_gmem_trace(output_dir+'gather_trace.bin.gz', sizeof_addr=8)
+    
+ 
     # print("\nSorted Kernel Map by Length of Matches:")
     # for off_idx, matches in sorted_kmap:
     #     if matches:

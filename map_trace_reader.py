@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
 from minuet_mapping import PHASES, OPS, TENSORS
 
-def read_trace(filename):
+def read_trace(filename,sizeof_addr=4):
     """Read a compressed memory trace file and return the entries."""
     entries = []
     
@@ -25,11 +25,19 @@ def read_trace(filename):
             
             # Read each entry
             for i in range(num_entries):
-                entry_data = f.read(8)
-                if len(entry_data) < 8:
-                    print(f"Error: Trace file {filename} is truncated. Expected 8 bytes for entry {i+1}, got {len(entry_data)}.")
+                if sizeof_addr == 4:
+                    entry_data = f.read(8) # Read 8 bytes for a <BBBBI structure
+                else:
+                    entry_data = f.read(12) # Read 12 bytes for a <BBBBQ structure
+                if len(entry_data) < 4 + sizeof_addr:
+                    # Corrected expected byte count in the error message
+                    print(f"Error: Trace file {filename} is truncated. Expected {4 + sizeof_addr} bytes for entry {i+1}, got {len(entry_data)}.")
                     break
-                entry = struct.unpack('BBBBI', entry_data)  # Format is BBBBI
+                # Use '<BBBBQ' for little-endian, 12-byte packed structure
+                if sizeof_addr == 4:
+                    entry = struct.unpack('<BBBBI', entry_data)  # Format is <BBBBI (little-endian)
+                else:
+                    entry = struct.unpack('<BBBBQ', entry_data)  # Format is <BBBBQ (little-endian)
                 phase_id, thread_id, op_id, tensor_id, addr = entry
                                 # Convert numeric IDs to strings
                 phase = PHASES.inverse[phase_id][0] if phase_id in PHASES.inverse else f"Unknown-{phase_id}"
@@ -217,6 +225,8 @@ def main():
     parser.add_argument('--filter-tensor', help='Filter by tensor type (only for single file analysis)')
     parser.add_argument('--plot', action='store_true', help='Generate memory access plots (only for single file analysis)')
     parser.add_argument('--plot-file', help='Save plot to file instead of displaying (only for single file analysis)')
+    parser.add_argument('--sizeof-addr', type=int, choices=[4, 8], default=4,
+                        help='Size of address in bytes (4 for 32-bit, 8 for 64-bit; default: 4)')
     
     args = parser.parse_args()
     
@@ -224,7 +234,7 @@ def main():
         diff_trace(args.trace_file, args.diff_file2)
     else:
         # Read trace file for single file analysis
-        entries = read_trace(args.trace_file)
+        entries = read_trace(args.trace_file, args.sizeof_addr)
         
         # Apply filters if specified
         if args.filter_phase:

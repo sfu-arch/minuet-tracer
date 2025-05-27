@@ -9,21 +9,23 @@ import gzip
 import struct
 import concurrent.futures # Add this import
 from hashlib import sha256
-from minuet_config import output_dir
-
-def file_checksum(filename):
-    hash_lib = sha256()
-    with open(filename, 'rb') as f:
-        # Read the file in chunks to handle large files efficiently
-        chunk = f.read(4096)
-        while chunk:
-            hash_lib.update(chunk)
-            chunk = f.read(4096)
-    return hash_lib.hexdigest()
-
-
 import numpy as np
 from typing import Sequence, Any, Mapping
+import minuet_config  # Import minuet_config for configuration settings
+# from minuet_config import output_dir # Original import
+import minuet_mapping as mapping_module # To access mapping_module.curr_phase
+from minuet_utils import file_checksum
+
+
+# def file_checksum(filename):
+#     """Calculate SHA-256 checksum of a file"""
+#     hash_lib = sha256()
+#     with open(filename, 'rb') as f:
+#         # Read in chunks of 4K
+#         for chunk in iter(lambda: f.read(4096), b''):
+#             hash_lib.update(chunk)
+#     return hash_lib.hexdigest()
+
 
 def create_slot_array(sorted_kmap_idx, kernel_map):
     slot_array = np.zeros(len(kernel_map.keys()), dtype=np.int32)
@@ -83,6 +85,50 @@ def create_in_out_masks(kernel_map, slot_dict, num_offsets, num_sources):
         futures = [executor.submit(_process_kernel_item, item) for item in kernel_map.items()]
         
     return out_mask, in_mask
+
+
+def write_metadata(out_mask, in_mask, slot_dict, slot_array, num_offsets, num_sources, total_slots, filename=minuet_config.output_dir+'metadata.bin.gz'):
+    """
+    Write the metadata to a gzipped binary file.
+    
+    Format:
+    - Magic number "MINU" + version (uint32)
+    - Number of offsets (uint32)
+    - Number of sources (uint32)
+    - Total slots allocated for gemm buffer (uint32)
+    - Number of active offsets (uint32)
+    - For each active offset:
+        - Offset value (uint32)
+        - Base address (uint32)
+        - Actual size without padding (uint32)
+        - Actual size with padding (uint32)
+    - Masks:
+        - Output mask (bytes)
+        - Input mask (bytes)
+    """
+    with gzip.open(filename, 'wb') as f:
+        # Write magic number ("MINU") and version (1)
+        f.write(struct.pack('4sI', b'MINU', 1))
+
+        # Write number of offsets and sources
+        f.write(struct.pack('II', num_offsets, num_sources))
+
+        # Write total slots allocated for gemm buffer
+        f.write(struct.pack('I', total_slots))
+
+        # Write number of active offsets
+        f.write(struct.pack('I', len(slot_dict)))
+
+        # Write each active offset, base address and actual size (without padding, with padding)
+        for i, (offset, addr) in enumerate(slot_dict.items()):     # Write offset value and entry counts
+            f.write(struct.pack('III', offset, addr, slot_array[i]))        
+       
+        # Write masks
+        f.write(out_mask.tobytes())
+        f.write(in_mask.tobytes())
+    
+    checksum = file_checksum(filename)
+    return checksum
 
 
 def read_metadata(filename):
@@ -341,7 +387,7 @@ def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
     return pos_indices, groups, membership, gemm_list, total_slots, checksum
 
 
-def write_gemm_list(gemm_data_list, filename = output_dir+"gemms.bin.gz"):
+def write_gemm_list(gemm_data_list, filename = minuet_config.output_dir+"gemms.bin.gz"):
     """
     Write the gemm list to a file in a packed binary format,
     compressed with gzip.
@@ -374,8 +420,8 @@ def read_gemm_list(filename):
     gemm_data_list = []
     
     # Define the format and size of the fixed-size header
-    # num_offsets, gemm_M, padding, len_inputs, len_outs
-    header_format = '<IIIII'  # Changed from !IIIII to <IIIII
+    # num_offsets, gemm_M, padding
+    header_format = '<III'  # Updated format to match write_gemm_list
     header_size = struct.calcsize(header_format)
 
     with gzip.open(filename, 'rb') as f: # Open in binary read mode
@@ -387,16 +433,16 @@ def read_gemm_list(filename):
             if len(packed_header) < header_size:
                 raise EOFError("Incomplete GEMM header found. File might be corrupted.")
 
-            num_offsets, gemm_M, padding, len_inputs, len_outs = struct.unpack(header_format, packed_header)
+            num_offsets, gemm_M, padding = struct.unpack(header_format, packed_header) # Updated unpacking
 
             gemm_entry = {
                 'num_offsets': num_offsets,
                 'gemm_M': gemm_M,
                 'gemm_N': num_offsets, # Reconstruct gemm_N, as it's num_offsets
                 'padding': padding,
-                'offsets': [],
-                'inputs': (),
-                'outs': ()
+                # 'offsets': [], # These were not written, so remove or handle if needed later
+                # 'inputs': (),  # These were not written
+                # 'outs': ()    # These were not written
             }
 
             gemm_data_list.append(gemm_entry)
@@ -425,7 +471,7 @@ def compact_bar_chart(groups):
 
 def gather_thread(
     # Arguments defining this thread's share of work
-    log_tid: int, 
+    thread_id: int, 
     num_threads: int, 
     # Original processing parameters (passed through)
     num_points: int,
@@ -441,75 +487,75 @@ def gather_thread(
     The function executed by each Python thread.
     It processes an interleaved subset of points. For each point, it processes all its tiles.
     """
-    
-    # --- Derived Constants (can be recalculated or passed if complex) ---
-    num_bulks_per_tile = 0
-    assert(tile_feat_size % bulk_feat_size == 0)
-    assert(tile_feat_size > 0)
-    assert (bulk_feat_size > 0)    
-    
-    num_bulks_per_tile = tile_feat_size // bulk_feat_size
-    total_feats_per_pt = num_tiles_per_pt * tile_feat_size 
+    # Thread synchronization
+    gmem_lock = threading.Lock()
+    t_local = threading.local()
 
-    # Each log_tid processes points in an interleaved fashion
-    # e.g., if num_threads = 4, log_tid = 0, it processes points 0, 4, 8, ...
+    def record_local(thread_id, op, addr):
+        """Record a memory access in thread-local storage"""
+        if not hasattr(t_local, 'local_trace'):
+            t_local.local_trace = []
+            
+        tensor = mapping_module.addr_to_tensor(addr)
+        # Assuming mapping_module.curr_phase is set appropriately for the gather operation
+        entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
+        t_local.local_trace.append(entry)
+
+    def flush_local_trace():
+        """Transfer thread-local trace to global mem_trace and clear local trace"""
+        if hasattr(t_local, 'local_trace') and t_local.local_trace:
+            with gmem_lock:
+                minuet_config.mem_trace.extend(t_local.local_trace)
+                t_local.local_trace = [] # Clear after flushing
+
+    assert(tile_feat_size % bulk_feat_size == 0)    
+    num_bulks = tile_feat_size // bulk_feat_size
+    total_feats_per_pt = num_tiles_per_pt * tile_feat_size
+    # Each thread_id processes points in an interleaved fashion
+    # e.g., if num_threads = 4, thread_id = 0, it processes points 0, 4, 8, ...
     # This is a simulation of the warp-level parallelism in CUDA.
     # Each thread will process a subset of points based on its logical ID
     # and the total number of threads.
     # This is to ensure that neighboring threads process adjacent memory locations at a time.
     
-    for pt_idx in range(log_tid, num_points, num_threads): 
+    for pt_idx in range(thread_id, num_points, num_threads): 
+        pt_base = pt_idx * total_feats_per_pt
         
-        tile_data = [0.0] * tile_feat_size 
-
-        for tile_idx_in_pt in range(num_tiles_per_pt): 
-            # 1. LOAD PHASE for one tile
-            pt_base = pt_idx * total_feats_per_pt 
-            tile_base_in_pt = tile_idx_in_pt * tile_feat_size 
-            tile_first_bulk_idx_in_pt = tile_base_in_pt // bulk_feat_size
-
-            for bulk_offset_in_tile in range(num_bulks_per_tile): 
-                bulk_idx_in_pt = tile_first_bulk_idx_in_pt + bulk_offset_in_tile
-                vload_addr = pt_base + bulk_idx_in_pt * bulk_feat_size
-                tile_data_bulk_lstart = bulk_offset_in_tile * bulk_feat_size
-
-                # Records as single access. 
-                # Simulation of a vector load in CUDA.
-                for elem_idx_in_bulk in range(bulk_feat_size): 
-                    gsrc_idx = vload_addr + elem_idx_in_bulk 
-                    tile_data_idx = tile_data_bulk_lstart + elem_idx_in_bulk
-                    assert(0 <= gsrc_idx < len(sources))
-                    assert(0 <= tile_data_idx < len(tile_data))
-                    tile_data[tile_data_idx] = sources[gsrc_idx]
+        for tile_idx in range(num_tiles_per_pt):
+            # --- LOAD: cut the tile into bulks in one go ---
+            tile_start = pt_base + tile_idx * tile_feat_size
             
-            # 2. STORE PHASE for the currently loaded tile
-            for off_idx in range(num_offsets): 
-                mask_idx = off_idx * num_points + pt_idx 
-                
-                assert(0 <= mask_idx < len(source_masks))
-                
-                dest_slot = source_masks[mask_idx] 
-                
-                if dest_slot == -1:  continue # Offset not present
-                
-                dest_tile_base_in_slot = tile_idx_in_pt * tile_feat_size
-                dest_tile_first_bulk_idx_in_slot = dest_tile_base_in_slot // bulk_feat_size
+            for b in range(num_bulks):
+                bulk_start_addr = tile_start + b * bulk_feat_size
+                bulk_end_addr = tile_start + (b + 1) * bulk_feat_size
 
-                for bulk_idx in range(num_bulks_per_tile): 
-                    dest_bulk_idx_in_slot = dest_tile_first_bulk_idx_in_slot + bulk_idx
-                    tile_data_bulk_lsrc = bulk_idx * bulk_feat_size
-                    vstore_addr = dest_slot*total_feats_per_pt + dest_bulk_idx_in_slot * bulk_feat_size
-                    
-                    for elem_idx_in_bulk in range(bulk_feat_size): 
-                        tile_data_idx = tile_data_bulk_lsrc + elem_idx_in_bulk 
-                        out_buf_gdest_idx = vstore_addr + elem_idx_in_bulk 
-                        assert(0 <= out_buf_gdest_idx < len(gemm_buffers))                             
-                        assert(0 <= tile_data_idx < len(tile_data))
-                        #    0 <= tile_data_idx < len(tile_data):
-                        gemm_buffers[out_buf_gdest_idx] = tile_data[tile_data_idx]
+                # Get the bulk data if data is available 
+                # Else it is just a simulation.
+                bulk = sources[bulk_start_addr:bulk_end_addr] if sources else None
+
+                # Record the load operation in local trace
+                record_local(thread_id, mapping_module.OPS['R'], minuet_config.IV_BASE + bulk_start_addr*minuet_config.SIZE_FEAT)
+
+                
+            # --- STORE: for each offset, copy each bulk slice into the right place ---
+            for off_idx in range(num_offsets):
+                mask_idx = off_idx * num_points + pt_idx
+                dest_slot = source_masks[mask_idx]
+                if dest_slot < 0:
+                    continue
+
+                dest_base = dest_slot * total_feats_per_pt + tile_idx * tile_feat_size
+                for b in range(num_bulks):
+                    bulk_start_addr = dest_base + b * bulk_feat_size
+                    if bulk is not None:
+                        gemm_buffers[bulk_start_addr : bulk_start_addr + bulk_feat_size] = bulk
+                    record_local(thread_id, mapping_module.OPS['W'], minuet_config.GM_BASE + bulk_start_addr*minuet_config.SIZE_FEAT)
+    flush_local_trace()
+    
+
 
 # Main function to orchestrate the threaded execution
-def python_threaded_gather_simulation(
+def mt_gather(
     # Parameters defining the data and processing
         num_threads: int,
         num_points: int,
@@ -524,7 +570,7 @@ def python_threaded_gather_simulation(
     """
     Orchestrates the gather operation using multiple Python threads.
     """
-
+    mapping_module.curr_phase = mapping_module.PHASES['GTH']  # Set the current phase for memory tracing
     # --- Input Validations ---
     if num_threads <= 0: 
         raise ValueError("num_threads must be positive.") # Updated variable name
@@ -545,12 +591,12 @@ def python_threaded_gather_simulation(
 
     # Create and start each thread
     for i in range(num_threads): # Use updated num_threads
-        log_tid = i 
+        thread_id = i 
         # Create a thread object, targeting the gather_thread function
         thread_obj = threading.Thread( 
             target=gather_thread,
             args=(
-                log_tid,
+                thread_id,
                 num_threads,
                 num_points,
                 num_offsets,
@@ -582,7 +628,7 @@ if __name__ == '__main__':
     _num_tiles = 4 
     _tile_feats = 16 
     _bulk_feats = 4  
-    _n_threads = 1 
+    _n_threads = 2 
     _n_offsets = 2 
     _total_feats_pt = _num_tiles * _tile_feats 
     
@@ -605,7 +651,7 @@ if __name__ == '__main__':
     print(f"Starting Python threaded simulation with {_n_threads} threads...")
     print(f"Initial sum of gemm_buffers: {sum(_src_bufs_data)}")
 
-    python_threaded_gather_simulation(
+    mt_gather(
         num_threads=_n_threads,  # Updated parameter name
         num_points=_num_pts,
         num_offsets = _n_offsets,
@@ -621,4 +667,6 @@ if __name__ == '__main__':
     print(f"Final sum of gemm_buffers: {sum(_src_bufs_data)}")
     # Add more checks here if needed, e.g., print parts of the buffer.
     
-    
+    for entry in minuet_config.mem_trace:
+        print(entry)
+

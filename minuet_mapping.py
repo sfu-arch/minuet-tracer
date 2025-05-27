@@ -8,7 +8,7 @@ from coord import pack32, unpack32, unpack32s, Coord3D
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from minuet_config import *
-from minuet_gather import file_checksum
+from minuet_utils import file_checksum
 from sorted_dict import SortedByValueLengthDict
 from sorted_dict import bidict
 curr_phase = None
@@ -18,7 +18,8 @@ PHASES = bidict({
     'QRY': 1,
     'SRT': 2,
     'PVT': 3,
-    'LKP': 4
+    'LKP': 4,
+    'GTH': 5
 })
 TENSORS = bidict({
     'I': 0,
@@ -27,9 +28,13 @@ TENSORS = bidict({
     'QO': 3,
     'PIV': 4,
     'KM': 5,
-    'WO': 6,
-    'TILE': 7
+    'WC': 6,
+    'TILE': 7,
+    'IV': 8,
+    'GM': 9,
+    'WV': 10
 })
+
 OPS = bidict({
     'R': 0,
     'W': 1
@@ -67,60 +72,38 @@ def addr_to_tensor(addr):
         return TENSORS['PIV']
     elif addr >= KM_BASE and addr < WO_BASE:
         return TENSORS['KM']
-    elif addr >= WO_BASE and addr < WV_BASE:
-        return TENSORS['WO']
-    else:
-        assert(False), f"Unknown address: {addr}"
-        return 'Unknown'
-
-def addr_to_tensor_str(addr):
-    """Convert address to tensor name."""
-    if addr >= I_BASE and addr < QK_BASE:
-        return 'I'
-    elif addr >= QK_BASE and addr < QI_BASE:
-        return TENSORS['QK']
-    elif addr >= QI_BASE and addr < QO_BASE:
-        return TENSORS['QI']
-    elif addr >= QO_BASE and addr < PIV_BASE:
-        return TENSORS['QO']
-    elif addr >= PIV_BASE and addr < KM_BASE:
-        return TENSORS['PIV']
-    elif addr >= KM_BASE and addr < WO_BASE:
-        return TENSORS['KM']
-    elif addr >= WO_BASE and addr < WV_BASE:
-        return TENSORS['WO']
+    elif addr >= WO_BASE and addr < IV_BASE:
+        return TENSORS['WC']    
+    elif addr >= IV_BASE and addr < GM_BASE:
+        return TENSORS['IV']
+    elif addr >= GM_BASE and addr < WV_BASE:
+        return TENSORS['GM']
+    elif addr >= WV_BASE and addr < WV_BASE + 2<<32:
+        return TENSORS['WV']
     else:
         assert(False), f"Unknown address: {addr}"
         return 'Unknown'
     
 
-def write_gmem_trace(filename):
+def write_gmem_trace(filename, sizeof_addr = 4):
     """Write memory trace to a file in compressed integer format."""
     # Create mappings for strings to integers
-    phase_map = {}
-    
-    # Create compressed trace
-    comp_trace = []
-    for entry in mem_trace:
-        phase_id, thread_id, op, tensor, addr = entry
-        
-        # Create compressed entry (all integers)
-        comp_entry = (phase_id, thread_id, op, tensor, addr)
-        comp_trace.append(comp_entry)
-    
     # Write to binary file for maximum compression
     with gzip.open(filename, 'wb') as f:
         # Write header with entry count
-        f.write(struct.pack('I', len(comp_trace)))
-        
+        f.write(struct.pack('I', len(mem_trace)))
         # Write each entry as packed integers (BBBBI format)
-        for entry in comp_trace:
+        for entry in mem_trace:
             # print(entry)
-            f.write(struct.pack('BBBBI', *entry))
-    
+            if sizeof_addr == 4:
+                # entry is (phase, thread_id, op, tensor, addr)
+                f.write(struct.pack('<BBBBI', *entry))
+            elif sizeof_addr == 8:
+                f.write(struct.pack('<BBBBQ', *entry))
+
     print(f"Memory trace written to {filename}")
     print(f"Compressed {len(mem_trace)} entries")
-    
+    mem_trace.clear()
     checksum = file_checksum(filename)
     return checksum
     # print(f"Phase mapping: {phase_map}")
