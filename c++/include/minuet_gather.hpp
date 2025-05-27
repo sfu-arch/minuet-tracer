@@ -38,4 +38,37 @@ GreedyGroupResult greedy_group_cpp(
     int max_raw_slots = -1
 );
 
+
+// --- Structs for Metadata Reading ---
+struct ActiveOffsetInfo {
+    uint32_t offset_key;
+    uint32_t base_address;
+    uint32_t num_matches; // Number of matches for this offset
+};
+
+struct MetadataContents {
+    uint32_t version;
+    uint32_t num_total_system_offsets; // Total number of offsets in the system (e.g., 27 for 3x3x3 kernel)
+    uint32_t num_total_system_sources; // Total number of unique source points
+    uint32_t total_slots_in_gemm_buffer;
+    uint32_t num_active_offsets_in_map;  // Number of offsets that actually have matches
+    std::vector<ActiveOffsetInfo> active_offsets_details;
+    std::vector<int32_t> out_mask;
+    std::vector<int32_t> in_mask;
+};
+
+// --- Function Declarations ---
+MetadataContents read_metadata_cpp(const std::string& filename);
+
+uint32_t write_metadata_cpp(
+    const std::vector<int32_t>& out_mask,
+    const std::vector<int32_t>& in_mask,
+    const std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>& active_offset_data, // (offset_key, base_addr, num_matches)
+    uint32_t num_total_system_offsets,
+    uint32_t num_total_system_sources,
+    uint32_t total_slots_in_gemm_buffer,
+    const std::string& filename
+);
+
+
 #endif // MINUET_GATHER_HPP

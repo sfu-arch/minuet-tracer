@@ -280,6 +280,53 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
         "Writes a list of GemmInfo to a gzipped file and returns its CRC32 checksum.");
 
 
+    // --- Bindings for Metadata Reading ---
+    py::class_<ActiveOffsetInfo>(m, "ActiveOffsetInfo")
+        .def(py::init<>())
+        .def_readwrite("offset_key", &ActiveOffsetInfo::offset_key)
+        .def_readwrite("base_address", &ActiveOffsetInfo::base_address)
+        .def_readwrite("num_matches", &ActiveOffsetInfo::num_matches)
+        .def("__repr__", [](const ActiveOffsetInfo&aoi) {
+            return "<ActiveOffsetInfo key=" + std::to_string(aoi.offset_key) +
+                   ", addr=" + std::to_string(aoi.base_address) +
+                   ", matches=" + std::to_string(aoi.num_matches) + ">";
+        });
+
+    py::class_<MetadataContents>(m, "MetadataContents")
+        .def(py::init<>())
+        .def_readwrite("version", &MetadataContents::version)
+        .def_readwrite("num_total_system_offsets", &MetadataContents::num_total_system_offsets)
+        .def_readwrite("num_total_system_sources", &MetadataContents::num_total_system_sources)
+        .def_readwrite("total_slots_in_gemm_buffer", &MetadataContents::total_slots_in_gemm_buffer)
+        .def_readwrite("num_active_offsets_in_map", &MetadataContents::num_active_offsets_in_map)
+        .def_readwrite("active_offsets_details", &MetadataContents::active_offsets_details)
+        .def_readwrite("out_mask", &MetadataContents::out_mask)
+        .def_readwrite("in_mask", &MetadataContents::in_mask)
+        .def("__repr__", [](const MetadataContents& mc) {
+            return "<MetadataContents version=" + std::to_string(mc.version) +
+                   ", num_sys_offsets=" + std::to_string(mc.num_total_system_offsets) +
+                   ", num_sys_sources=" + std::to_string(mc.num_total_system_sources) +
+                   ", total_gemm_slots=" + std::to_string(mc.total_slots_in_gemm_buffer) +
+                   ", num_active_offsets=" + std::to_string(mc.num_active_offsets_in_map) +
+                   ", active_offsets_count=" + std::to_string(mc.active_offsets_details.size()) +
+                   ", out_mask_size=" + std::to_string(mc.out_mask.size()) +
+                   ", in_mask_size=" + std::to_string(mc.in_mask.size()) + ">";
+        });
+
+    m.def("read_metadata_cpp", &read_metadata_cpp,
+          py::arg("filename"),
+          "Reads metadata from a gzipped binary file.");
+
+    m.def("write_metadata_cpp", &write_metadata_cpp,
+          py::arg("out_mask"),
+          py::arg("in_mask"),
+          py::arg("active_offset_data"), // std::vector<std::tuple<uint32_t, uint32_t, uint32_t>>
+          py::arg("num_total_system_offsets"),
+          py::arg("num_total_system_sources"),
+          py::arg("total_slots_in_gemm_buffer"),
+          py::arg("filename"),
+          "Writes metadata to a gzipped binary file and returns its CRC32 checksum.");
+
     // // Bind Minuet Gather Structs
 
 }

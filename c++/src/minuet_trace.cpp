@@ -10,10 +10,17 @@
 #include <vector>
 #include <zlib.h>
 #include <numeric> // For std::accumulate
+#include <thread> // For std::thread
+#include <mutex>  // For std::mutex
+#include <atomic> // For std::atomic
 
 // --- Global Variable Definitions ---
 std::vector<MemoryAccessEntry> mem_trace; // Updated name
 std::string curr_phase = "";              // Updated name
+
+// --- Mutexes for threaded operations ---
+static std::mutex kmap_update_mutex;
+static std::mutex global_mem_trace_mutex;
 
 // --- Getter/Setter for global state and mem_trace management ---
 std::vector<MemoryAccessEntry> get_mem_trace() {
@@ -182,6 +189,10 @@ uint32_t write_gmem_trace(const std::string &filename) {
 }
 
 void record_access(int thread_id, const std::string &op, uint64_t addr) {
+  // This global record_access should be used carefully in multi-threaded contexts
+  // or be made thread-safe if called directly by multiple threads.
+  // For the new perform_coordinate_lookup, threads will use local traces.
+  std::lock_guard<std::mutex> lock(global_mem_trace_mutex);
   std::string tensor_str = addr_to_tensor(addr);
   mem_trace.push_back({curr_phase, thread_id, op, tensor_str, addr});
 }
@@ -435,136 +446,139 @@ create_tiles_and_pivots(const std::vector<IndexedCoord> &uniq_coords,
   }
   return result;
 }
-KernelMapType perform_coordinate_lookup( // Renamed from lookup
+KernelMapType perform_coordinate_lookup(
     const std::vector<IndexedCoord> &uniq_coords,
     const std::vector<IndexedCoord> &qry_keys,
     const std::vector<int> &qry_in_idx, const std::vector<int> &qry_off_idx,
-    const std::vector<Coord3D> &wt_offsets,
+    const std::vector<Coord3D> &wt_offsets, // wt_offsets is not directly used in Python lookup logic for kmap values
     const std::vector<std::vector<IndexedCoord>> &tiles,
     const std::vector<IndexedCoord> &pivs, int tile_size_param) {
-  curr_phase = PHASES.inverse.at(4); // "LKP"
-  KernelMapType kmap(false); // false for descending order (longest match list first)
-  uint64_t kmap_write_idx = 0; // Local counter for KM writes, like Python
 
-  if (uniq_coords.empty() || qry_keys.empty()) {
-    return kmap;
-  }
-
-  for (size_t q_glob_idx = 0; q_glob_idx < qry_keys.size(); ++q_glob_idx) {
-    const auto &q_key_item = qry_keys[q_glob_idx];
-    uint32_t current_query_key = q_key_item.to_key();
-    int query_original_src_idx = q_key_item.orig_idx;
-    int current_offset_idx =
-        qry_off_idx[q_glob_idx]; // Index for off_coords / wt_offsets
-    int tid = static_cast<int>(q_glob_idx % g_config.NUM_THREADS);
-
-    // 1. Read query key
-    record_access(tid, OPS.inverse.at(0),
-                  g_config.QK_BASE + q_glob_idx * g_config.SIZE_KEY); // "R"
-
-    // Simulate Python's find_tile_id (binary search on pivs)
-    int target_tile_id = -1;
-    if (!pivs.empty()) {
-      int low = 0, high = static_cast<int>(pivs.size()) - 1;
-      target_tile_id =
-          0; // Default to first tile if not found or q_key is smaller
-
-      while (low <= high) {
-        int mid = low + (high - low) / 2;
-        record_access(tid, OPS.inverse.at(0),
-                      g_config.PIV_BASE + mid * g_config.SIZE_KEY); // "R" pivot
-        if (pivs[mid].to_key() <= current_query_key) {
-          target_tile_id = mid;
-          low = mid + 1;
-        } else {
-          high = mid - 1;
-        }
-      }
+    set_curr_phase(PHASES.inverse.at(4)); // "LKP"
+    KernelMapType kmap(false); // false for descending order (longest match list first)
+    
+    if (uniq_coords.empty() || qry_keys.empty()) {
+        return kmap;
     }
 
-    // Simulate Python's search_in_tile (binary search in tiles[target_tile_id])
-    int found_uc_idx = -1; // Index in uniq_coords
-    if (target_tile_id != -1 &&
-        target_tile_id < static_cast<int>(tiles.size())) {
-      const auto &current_tile = tiles[target_tile_id];
-      if (!current_tile.empty()) {
-        int low = 0, high = static_cast<int>(current_tile.size()) - 1;
-        while (low <= high) {
-          int mid_local = low + (high - low) / 2;
-          // Calculate the conceptual address in the TILE_BASE region
-          // The tile_id * tile_size gives the start index in the original
-          // uniq_coords Python: TILE_BASE + (tile_id * tile_size + mid_local) *
-          // SIZE_KEY Here, current_tile[mid_local] is an IndexedCoord. Its
-          // original position in uniq_coords would be roughly target_tile_id *
-          // tile_size_param + mid_local if tiles are contiguous slices. For
-          // simplicity in tracing, we use an estimated index. The key is to
-          // record a read from TILE_BASE.
-          size_t approx_tile_element_orig_idx =
-              static_cast<size_t>(target_tile_id * tile_size_param + mid_local);
-          if (approx_tile_element_orig_idx >=
-              uniq_coords.size()) { // Boundary check
-            approx_tile_element_orig_idx =
-                uniq_coords.size() > 0 ? uniq_coords.size() - 1 : 0;
-          }
+    std::atomic<uint64_t> kmap_write_idx_atomic{0}; // Atomic counter for KM write simulation
 
-          record_access(tid, OPS.inverse.at(0),
-                        g_config.TILE_BASE + approx_tile_element_orig_idx *
-                                        g_config.SIZE_KEY); // "R" from TILE
+    const size_t qry_count = qry_keys.size();
+    const int BATCH_SIZE = 128; // As in Python
+    const size_t num_batches = (qry_count + BATCH_SIZE - 1) / BATCH_SIZE;
+    unsigned int num_hw_threads = g_config.NUM_THREADS; // Use configured NUM_THREADS
 
-          if (current_tile[mid_local].to_key() == current_query_key) {
-            // To get the index relative to the original uniq_coords array:
-            // We need to know how tiles map back to uniq_coords indices.
-            // Assuming tiles are contiguous blocks of uniq_coords:
-            // The first element of tiles[target_tile_id] corresponds to
-            // uniq_coords[target_tile_id * tile_size_param]
-            found_uc_idx = static_cast<int>(
-                static_cast<size_t>(target_tile_id * tile_size_param) +
-                mid_local);
-            if (found_uc_idx >= static_cast<int>(uniq_coords.size()) ||
-                uniq_coords[found_uc_idx].to_key() != current_query_key) {
-              // Fallback if indexing assumption is wrong, search linearly in
-              // uniq_coords for the actual object This part is tricky without
-              // knowing the exact structure of tiles vs uniq_coords For now, we
-              // assume found_uc_idx is correct if key matches. The Python
-              // version's search_in_tile returns the element itself, not its
-              // global index. Let's assume current_tile[mid_local] is the
-              // matched IndexedCoord from uniq_coords. We need its original_idx
-              // field.
-              for (size_t uc_scan_idx = 0; uc_scan_idx < uniq_coords.size();
-                   ++uc_scan_idx) {
-                if (uniq_coords[uc_scan_idx].to_key() == current_query_key &&
-                    uniq_coords[uc_scan_idx].orig_idx ==
-                        current_tile[mid_local].orig_idx) {
-                  found_uc_idx = static_cast<int>(uc_scan_idx);
-                  break;
-                }
-              }
+    std::cout << "Starting LKP phase with " << num_hw_threads << " threads, "
+              << num_batches << " batches." << std::endl;
+
+    for (size_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
+        size_t batch_start = batch_idx * BATCH_SIZE;
+        size_t current_batch_size = std::min(static_cast<size_t>(BATCH_SIZE), qry_count - batch_start);
+
+        if (current_batch_size <= 0) break;
+
+        std::vector<std::thread> threads_pool;
+        size_t portion_size = (current_batch_size + num_hw_threads - 1) / num_hw_threads;
+
+        for (unsigned int tid = 0; tid < num_hw_threads; ++tid) {
+            size_t thread_start_in_batch = tid * portion_size;
+            size_t thread_end_in_batch = std::min(thread_start_in_batch + portion_size, current_batch_size);
+
+            if (thread_start_in_batch < current_batch_size) {
+                threads_pool.emplace_back([&, batch_start, tid, thread_start_in_batch, thread_end_in_batch]() {
+                    std::vector<MemoryAccessEntry> local_thread_mem_trace;
+                    auto record_access_local = 
+                        [&](int t_id, const std::string& op_str, uint64_t addr_val) {
+                        std::string tensor_str_val = addr_to_tensor(addr_val);
+                        local_thread_mem_trace.push_back({get_curr_phase(), t_id, op_str, tensor_str_val, addr_val});
+                    };
+
+                    for (size_t qry_offset_in_batch = thread_start_in_batch; qry_offset_in_batch < thread_end_in_batch; ++qry_offset_in_batch) {
+                        size_t q_glob_idx = batch_start + qry_offset_in_batch;
+                        if (q_glob_idx >= qry_count) continue;
+
+                        const auto &q_key_item = qry_keys[q_glob_idx];
+                        uint32_t current_query_key = q_key_item.to_key();
+                        int query_original_src_idx = q_key_item.orig_idx; // Original index of the source point that generated this query
+                        int current_query_offset_list_idx = qry_off_idx[q_glob_idx]; // Index into the original off_coords list
+
+                        // 1. Read query key
+                        record_access_local(tid, OPS.inverse.at(0), // "R"
+                                      g_config.QK_BASE + q_glob_idx * g_config.SIZE_KEY);
+
+                        // 2. Simulate Python's find_tile_id (binary search on pivs)
+                        int target_tile_id = -1;
+                        if (!pivs.empty()) {
+                            int low = 0, high = static_cast<int>(pivs.size()) - 1;
+                            target_tile_id = 0; 
+                            while (low <= high) {
+                                int mid = low + (high - low) / 2;
+                                record_access_local(tid, OPS.inverse.at(0), // "R" pivot
+                                              g_config.PIV_BASE + mid * g_config.SIZE_KEY);
+                                if (pivs[mid].to_key() <= current_query_key) {
+                                    target_tile_id = mid;
+                                    low = mid + 1;
+                                } else {
+                                    high = mid - 1;
+                                }
+                            }
+                        }
+                        
+                        // 3. Simulate Python's search_in_tile
+                        if (target_tile_id != -1 && target_tile_id < static_cast<int>(tiles.size())) {
+                            const auto &current_tile_vec = tiles[target_tile_id];
+                            // Python version does linear scan in tile; C++ can do binary search if tile is sorted
+                            // For now, matching Python's linear scan for trace consistency
+                            for (size_t local_idx_in_tile = 0; local_idx_in_tile < current_tile_vec.size(); ++local_idx_in_tile) {
+                                const auto& tile_indexed_coord = current_tile_vec[local_idx_in_tile];
+                                size_t approx_tile_element_orig_idx = static_cast<size_t>(target_tile_id * tile_size_param + local_idx_in_tile);
+                                if (approx_tile_element_orig_idx >= uniq_coords.size()) {
+                                     approx_tile_element_orig_idx = uniq_coords.empty() ? 0 : uniq_coords.size() - 1;
+                                }
+                                record_access_local(tid, OPS.inverse.at(0), // "R" from TILE
+                                              g_config.TILE_BASE + approx_tile_element_orig_idx * g_config.SIZE_KEY);
+
+                                if (tile_indexed_coord.to_key() == current_query_key) {
+                                    // Match found
+                                    int input_idx_from_uniq_coords = tile_indexed_coord.orig_idx; // This is the original index from the initial input coordinates
+
+                                    { // Lock kmap for update
+                                        std::lock_guard<std::mutex> lock(kmap_update_mutex);
+                                        kmap[current_query_offset_list_idx].emplace_back(input_idx_from_uniq_coords, query_original_src_idx);
+                                    }
+                                    
+                                    // Record write to kernel map simulation
+                                    uint64_t current_kmap_write_offset = kmap_write_idx_atomic.fetch_add(1);
+                                    record_access_local(tid, OPS.inverse.at(1), // "W"
+                                                  g_config.KM_BASE + current_kmap_write_offset * (g_config.SIZE_INT + g_config.SIZE_INT));
+                                    break; 
+                                }
+                            }
+                        }
+                    } // end for qry_offset_in_batch
+
+                    // Merge local trace to global trace
+                    if (!local_thread_mem_trace.empty()) {
+                        std::lock_guard<std::mutex> lock(global_mem_trace_mutex);
+                        mem_trace.insert(mem_trace.end(), local_thread_mem_trace.begin(), local_thread_mem_trace.end());
+                    }
+                }); // end lambda
+            } // end if thread_start_in_batch
+        } // end for tid
+
+        for (auto &th : threads_pool) {
+            if (th.joinable()) {
+                th.join();
             }
-            break;
-          } else if (current_tile[mid_local].to_key() < current_query_key) {
-            low = mid_local + 1;
-          } else {
-            high = mid_local - 1;
-          }
         }
-      }
-    }
-
-    if (found_uc_idx != -1 &&
-        found_uc_idx < static_cast<int>(uniq_coords.size())) {
-      // Match found
-
-      kmap[current_offset_idx].emplace_back(uniq_coords[found_uc_idx].orig_idx,
-                                          query_original_src_idx);
-
-      // Record write to kernel map (Python: KM_BASE + kmap_write_idx *
-      // (SIZE_INT + SIZE_INT))
-      record_access(tid, OPS.inverse.at(1),
-                    g_config.KM_BASE + kmap_write_idx * (g_config.SIZE_INT + g_config.SIZE_INT)); // "W"
-      kmap_write_idx++;
-    }
-  }
-  return kmap;
+        if ((batch_idx + 1) % 10 == 0 || (batch_idx + 1) == num_batches) { // Print progress
+             std::cout << "LKP Progress: Batch " << (batch_idx + 1) << "/" << num_batches << " processed." << std::endl;
+        }
+    } // end for batch_idx
+    
+    set_curr_phase(""); // Clear phase
+    std::cout << "LKP phase complete." << std::endl;
+    return kmap;
 }
 
 uint32_t write_kernel_map_to_gz(

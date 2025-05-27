@@ -85,7 +85,7 @@ try:
     # These Python-side configs might now be redundant if C++ config is the source of truth
     # Or they might be used for Python-specific parts of the script
     from minuet_mapping import PHASES as PY_PHASES, OPS as PY_OPS, TENSORS as PY_TENSORS #, output_dir as PY_output_dir, debug as PY_debug, NUM_THREADS as PY_NUM_THREADS, I_BASE as PY_I_BASE, TILE_BASE as PY_TILE_BASE, QK_BASE as PY_QK_BASE, QI_BASE as PY_QI_BASE, QO_BASE as PY_QO_BASE, PIV_BASE as PY_PIV_BASE, KM_BASE as PY_KM_BASE, WO_BASE as PY_WO_BASE, SIZE_KEY as PY_SIZE_KEY, SIZE_INT as PY_SIZE_INT
-    from minuet_gather import create_in_out_masks, compact_bar_chart # Removed greedy_group, write_gemm_list from here if C++ versions are used
+    from minuet_gather import create_in_out_masks, compact_bar_chart # Removed write_metadata import from minuet_gather
     # from minuet_config import GEMM_ALIGNMENT, GEMM_WT_GROUP, GEMM_SIZE, NUM_TILES, TILE_FEATS, BULK_FEATS, TOTAL_FEATS_PT
 except ImportError as e:
     print(f"Failed to import Minuet Python utility modules (minuet_mapping, etc.): {e}")
@@ -143,14 +143,16 @@ def main():
 
     # --- Phase 4: Tile and Pivot Generation ---
     print(f"--- Phase: {'PVT'} (PVT) ---")
-    tiles_pivots_data_cpp = minuet_cpp.create_tiles_and_pivots(unique_indexed_coords_cpp, cpp_global_config.NUM_PIVOTS) # Use config
+    # Assuming cpp_global_config.NUM_TILES means "items per tile" based on Python default and usage.
+    tiles_pivots_data_cpp = minuet_cpp.create_tiles_and_pivots(unique_indexed_coords_cpp, cpp_global_config.NUM_TILES)
 
     # --- Phase 5: Lookup ---
     print(f"--- Phase: {'LKP'} (LKP) ---")
+    # The last argument to perform_coordinate_lookup is tile_size_param, which should be items_per_tile.
     kernel_map_result_cpp = minuet_cpp.perform_coordinate_lookup(
         unique_indexed_coords_cpp, query_data_cpp.qry_keys, query_data_cpp.qry_in_idx,
         query_data_cpp.qry_off_idx, query_data_cpp.wt_offsets,
-        tiles_pivots_data_cpp.tiles, tiles_pivots_data_cpp.pivots, cpp_global_config.NUM_TILES # Use config
+        tiles_pivots_data_cpp.tiles, tiles_pivots_data_cpp.pivots, cpp_global_config.NUM_TILES
     )
     minuet_cpp.set_curr_phase("") # Clear phase
 
@@ -198,6 +200,7 @@ def main():
 
     map_trace_filename = os.path.join(current_output_dir, "map_trace_cpp.bin.gz")
     kernel_map_filename = os.path.join(current_output_dir, "kernel_map_cpp.bin.gz")
+    metadata_filename = os.path.join(current_output_dir, "metadata.bin.gz") # Added for metadata file
     
     map_trace_checksum_cpp = 0 # Initialize with a default value (e.g., 0 or -1)
     kernel_map_checksum_cpp = 0 # Initialize
@@ -249,7 +252,7 @@ def main():
     # If kernel_map_result_cpp.items() gives items sorted by key (offset_key_int),
     # and we want to group based on slot sizes (match list lengths), we need to sort slot_array.
     # However, the Python greedy_group took the kmap, offsets_active, and slot_array.
-    # The C++ greedy_group_cpp takes only the list of slot sizes.
+    # The C++ `greedy_group_cpp` takes only the list of slot sizes.
     # Let's use the 'slot_array' which contains lengths of match lists.
     # The Python greedy_group sorts this internally if it's passed as a dictionary.
     # The C++ version expects a pre-sorted list of slot sizes.
@@ -259,8 +262,7 @@ def main():
     # The C++ `greedy_group_cpp` takes `slots` (a list of integers, assumed sorted descending).
     # `slot_array` here is already the list of match list lengths, corresponding to `offsets_active`.
     # We need to sort `slot_array` in descending order for the C++ function.
-    cpp_slots_arg = slot_array.copy() # Copy to avoid modifying the original
-    # cpp_slots_arg = sorted(slot_array, reverse=True)
+    cpp_slots_arg = sorted(slot_array, reverse=True)
 
     print(f"Calling C++ greedy_group_cpp with {len(cpp_slots_arg)} slot sizes.")
     if cpp_global_config.debug:
@@ -306,9 +308,9 @@ def main():
     # se = (start_pos, end_pos)
     # Let's try to make a simplified groups list for the chart, using the C++ group info.
     # The 'members' in C++ GroupInfo are indices into the sorted slot list.
-    # This is not directly translatable to the original (start_pos, end_pos) expected by compact_bar_chart
-    # without mapping back to original offset indices.
-    # This is a placeholder for now.
+    # This is not directly (start_pos, end_pos) of original items.
+    # For charting, we might just use a group index or a simplified representation.
+    # Using (first_member_idx, last_member_idx) from the sorted list as a proxy for 'se'.
     groups_for_chart = []
     for g_info in groups_cpp_objects:
         # g_info.members are indices into the sorted list of slot sizes.
@@ -327,30 +329,34 @@ def main():
     # slot_dict maps original offset indices to their starting slot index in the GEMM buffer.
     # The `pos_indices` from C++ `greedy_group_cpp` are for the `cpp_slots_arg` (sorted slot sizes).
     # We need to map these back to the original `offsets_active`.
-    # This requires knowing the original order of `slot_array` before it was sorted into `cpp_slots_arg`.
-    # Let's create a mapping from sorted slot size back to its original position in `offsets_active`.
     
-    # Create pairs of (slot_size, original_index_in_offsets_active)
-    indexed_slot_array = list(enumerate(slot_array)) # slot_array is unsorted here
-    # Sort these pairs by slot_size descending, similar to how cpp_slots_arg was created
-    sorted_indexed_slot_array = sorted(indexed_slot_array, key=lambda x: x[1], reverse=True)
+    # Create pairs of (slot_size, original_index_in_offsets_active) from the unsorted slot_array
+    # This helps map the sorted results from greedy_group_cpp back to original offset keys.
+    indexed_original_slot_array = list(enumerate(slot_array)) # slot_array is unsorted here (ordered by offset_key)
+    
+    # Sort these pairs by slot_size descending, to match the order of cpp_slots_arg
+    # Each item in sorted_indexed_slot_array is (original_index_in_offsets_active, slot_size)
+    sorted_indexed_original_slot_array = sorted(indexed_original_slot_array, key=lambda x: x[1], reverse=True)
 
-    # Now, pos_indices from C++ corresponds to sorted_indexed_slot_array.
-    # We can build slot_dict by mapping original_index_in_offsets_active to the calculated position.
+    # Now, slot_indices from C++ (which are for cpp_slots_arg) can be mapped.
+    # slot_dict maps original_offset_key to its starting slot index in the GEMM buffer.
     slot_dict = {}
-    for i, (original_idx_in_offsets_active, _) in enumerate(sorted_indexed_slot_array):
+    for i in range(len(sorted_indexed_original_slot_array)):
+        # original_idx_in_offsets_active is the index into the original offsets_active list
+        original_idx_in_offsets_active = sorted_indexed_original_slot_array[i][0]
         original_offset_key = offsets_active[original_idx_in_offsets_active]
-        slot_dict[original_offset_key] = slot_indices[i] # slot_indices[i] is the start for this slot size
+        # slot_indices[i] is the base address for the i-th item in the sorted list (cpp_slots_arg)
+        slot_dict[original_offset_key] = slot_indices[i]
 
 
     # Generate masks with global idx.
-    # For create_in_out_masks, uniq_coords_count is len(unique_indexed_coords_cpp)
-    # total_num_offsets is len(offset_coords_tuples_raw)
+    num_total_system_offsets = len(offset_coords_tuples_raw)
+    num_total_system_sources = len(unique_indexed_coords_cpp)
     out_mask, in_mask = create_in_out_masks(
-        kernel_map_result_cpp, # Use kernel_map_result_cpp directly
-        slot_dict, 
-        len(offset_coords_tuples_raw), 
-        len(unique_indexed_coords_cpp)
+        kernel_map_result_cpp, 
+        slot_dict, # slot_dict keys are original offset keys, values are base addresses
+        num_total_system_offsets, 
+        num_total_system_sources
     )
     
     print(out_mask, in_mask) # Debug print of masks
@@ -384,10 +390,39 @@ def main():
         print(membership)
 
     # Write all checksums to file as json
+    # Call write_metadata_cpp
+    print(f"Writing metadata to {metadata_filename} using C++ implementation.")
+
+    # Prepare active_offset_data for C++: list of (offset_key, base_addr, num_matches)
+    # slot_dict iterates by slot size descending (due to its construction order)
+    # cpp_slots_arg is num_matches, also by slot size descending
+    active_offset_data_for_cpp = []
+    for i, (offset_key, base_addr) in enumerate(slot_dict.items()):
+        num_matches = cpp_slots_arg[i] # cpp_slots_arg is sorted list of match counts
+        active_offset_data_for_cpp.append((offset_key, base_addr, num_matches))
+    
+    # Convert numpy masks to lists of int32_t for C++ vector binding
+    # pybind11 can often handle numpy arrays directly if they are C-contiguous and of the correct type.
+    # Let's try passing them directly first. If it fails, convert to .tolist().
+    # out_mask and in_mask are already np.int32.
+    
+    metadata_checksum_cpp = minuet_cpp.write_metadata_cpp(
+        out_mask, # Pass NumPy array directly
+        in_mask,  # Pass NumPy array directly
+        active_offset_data_for_cpp,
+        num_total_system_offsets,
+        num_total_system_sources,
+        total_slots, # This is total_slots_allocated from greedy_group_result_cpp
+        metadata_filename
+    )
+    print(f"C++ calculated CRC32 for metadata: {hex(metadata_checksum_cpp)}")
+
+
     checksums = {
-        "map_trace_cpp.bin": hex(map_trace_checksum_cpp), 
-        "kernel_map_cpp.bin": hex(kernel_map_checksum_cpp), 
-        "gemms.bin.gz": hex(gemm_checksum_cpp), # Use checksum from C++ result
+        "map_trace_cpp.bin.gz": hex(map_trace_checksum_cpp), 
+        "kernel_map_cpp.bin.gz": hex(kernel_map_checksum_cpp), 
+        "gemms.bin.gz": hex(gemm_checksum_cpp),
+        "metadata.bin.gz": hex(metadata_checksum_cpp) # Use CRC32 from C++
     }
     
     checksum_filename = os.path.join(current_output_dir, 'checksums_cpp.json')

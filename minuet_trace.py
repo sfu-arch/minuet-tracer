@@ -115,7 +115,10 @@ if __name__ == '__main__':
 
     # Generate masks with global idx.
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
-    
+
+    write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
+
+
     print(out_mask, in_mask)
 
     # Calculate buffer from slot_dict and slot_array
@@ -215,8 +218,7 @@ if __name__ == '__main__':
     #     if matches:
     #         print(f"  Offset {off_coords[off_idx]}: {matches}")
     # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
-    from minuet_gather import compact_bar_chart
-    compact_bar_chart(groups)
+
 
 
 
