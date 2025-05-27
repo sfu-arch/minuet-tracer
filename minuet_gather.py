@@ -570,21 +570,7 @@ def mt_gather(
     """
     Orchestrates the gather operation using multiple Python threads.
     """
-    mapping_module.curr_phase = mapping_module.PHASES['GTH']  # Set the current phase for memory tracing
-    # --- Input Validations ---
-    if num_threads <= 0: 
-        raise ValueError("num_threads must be positive.") # Updated variable name
-    if num_points < 0: raise ValueError("num_points cannot be negative.")
-    if num_tiles_per_pt < 0: raise ValueError("num_tiles_per_pt cannot be negative.")
-    if tile_feat_size < 0: raise ValueError("tile_feat_size cannot be negative.")
-    
-    if tile_feat_size > 0:
-        if bulk_feat_size <= 0:
-            raise ValueError("bulk_feat_size must be positive if tile_feat_size > 0.")
-        if tile_feat_size % bulk_feat_size != 0:
-            raise ValueError("tile_feat_size must be divisible by bulk_feat_size.")
-    elif bulk_feat_size < 0:
-        raise ValueError("bulk_feat_size cannot be negative.")
+    mapping_module.curr_phase = mapping_module.PHASES['GTH']  # Set the current 
 
     # --- Thread Management ---
     threads_list = [] 
@@ -669,4 +655,146 @@ if __name__ == '__main__':
     
     for entry in minuet_config.mem_trace:
         print(entry)
+
+
+# Scatter operation: thread function
+def scatter_thread(
+    thread_id: int,
+    num_threads: int,
+    num_points: int,          # Number of *output* points
+    num_offsets: int,
+    num_tiles_per_pt: int,
+    tile_feat_size: int,
+    bulk_feat_size: int,
+    out_mask: list, # This is the in_mask from create_in_out_masks
+    gemm_buffers: list,       # Source of data (indexed by gemm_slot)
+    outputs: list             # Destination array (indexed by output_pt_idx)
+):
+    """
+    The function executed by each Python thread for scatter operation.
+    It processes an interleaved subset of output points.
+    Reads an entire source tile from gemm_buffers into a temporary buffer,
+    then writes this temporary buffer to the corresponding destination tile in outputs.
+    Mirrors the bulk handling logic of gather_thread.
+    """
+    # Thread synchronization and local trace setup (same as gather_thread)
+    gmem_lock = threading.Lock()
+    t_local = threading.local()
+
+    def record_local(thread_id, op, addr):
+        if not hasattr(t_local, 'local_trace'):
+            t_local.local_trace = []
+        tensor = mapping_module.addr_to_tensor(addr)
+        entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
+        t_local.local_trace.append(entry)
+
+    def flush_local_trace():
+        if hasattr(t_local, 'local_trace') and t_local.local_trace:
+            with gmem_lock:
+                minuet_config.mem_trace.extend(t_local.local_trace)
+                t_local.local_trace = []
+
+    # Assumptions: num_bulks > 0, and tile_feat_size % bulk_feat_size == 0.
+    num_bulks = tile_feat_size // bulk_feat_size
+    total_feats_per_pt = num_tiles_per_pt * tile_feat_size
+
+    # pt_idx here refers to an *output* point index
+    for pt_idx in range(thread_id, num_points, num_threads):
+        output_pt_base = pt_idx * total_feats_per_pt
+
+        for tile_idx in range(num_tiles_per_pt):
+            output_tile_base = output_pt_base + tile_idx * tile_feat_size # Base for current output tile
+
+            for off_idx in range(num_offsets):
+                mask_idx = off_idx * num_points + pt_idx
+                gemm_slot = out_mask[mask_idx]
+
+                if gemm_slot == -1:
+                    continue
+
+                gemm_buffer_source_tile_base = gemm_slot * total_feats_per_pt + tile_idx * tile_feat_size
+                
+                # Initialize a temporary buffer for the tile
+                temp_tile_buffer = [0.0] * tile_feat_size
+
+                # --- Phase 1: Read entire source tile from gemm_buffers into temp_tile_buffer ---
+                for b_load in range(num_bulks):
+                    bulk_offset_in_tile = b_load * bulk_feat_size
+                    gemm_bulk_source_addr_global = gemm_buffer_source_tile_base + bulk_offset_in_tile
+                    
+                    # Record read access
+                    record_local(thread_id, mapping_module.OPS['R'], minuet_config.GM_BASE + gemm_bulk_source_addr_global * minuet_config.SIZE_FEAT)
+                    
+                    # Actual data loading into temp_tile_buffer if gemm_buffers is available
+                    if gemm_buffers is not None:
+                        source_start_idx = gemm_bulk_source_addr_global
+                        source_end_idx = gemm_bulk_source_addr_global + bulk_feat_size
+                        
+                        # Assuming source indices are valid as per original logic
+                        temp_tile_buffer[bulk_offset_in_tile : bulk_offset_in_tile + bulk_feat_size] = gemm_buffers[source_start_idx:source_end_idx]
+
+                # --- Phase 2: Write from temp_tile_buffer to outputs array ---
+                for b_store in range(num_bulks):
+                    bulk_offset_in_tile = b_store * bulk_feat_size
+                    output_bulk_dest_addr_global = output_tile_base + bulk_offset_in_tile
+                    
+                    # Record write access
+                    ov_base = getattr(minuet_config, 'OV_BASE', minuet_config.GM_BASE + (1 << 30)) # Placeholder for OV_BASE
+                    record_local(thread_id, mapping_module.OPS['W'], ov_base + output_bulk_dest_addr_global * minuet_config.SIZE_FEAT)
+                    
+                    # Actual data storing only if outputs is not None AND gemm_buffers was not None (i.e., temp_tile_buffer has valid data)
+                    if outputs is not None and gemm_buffers is not None:
+                        bulk_data_to_write = temp_tile_buffer[bulk_offset_in_tile : bulk_offset_in_tile + bulk_feat_size]
+                        
+                        dest_start_idx = output_bulk_dest_addr_global
+                        dest_end_idx = output_bulk_dest_addr_global + bulk_feat_size
+                        
+                        outputs[dest_start_idx:dest_end_idx] += bulk_data_to_write
+    flush_local_trace()
+
+# Main function to orchestrate the threaded scatter execution
+def mt_scatter(
+    num_threads: int,
+    num_points: int,          # Number of *output* points
+    num_offsets: int,
+    num_tiles_per_pt: int,
+    tile_feat_size: int,
+    bulk_feat_size: int,
+    out_mask: list, # This is the in_mask from create_in_out_masks
+    gemm_buffers: list,       # Source of data
+    outputs: list             # Destination array
+) -> None:
+    """
+    Orchestrates the scatter operation using multiple Python threads.
+    """
+    # Ensure 'SCT' phase is defined in mapping_module.PHASES
+    mapping_module.curr_phase = mapping_module.PHASES['SCT']
+
+    # --- Thread Management ---
+    threads_list = []
+
+    for i in range(num_threads):
+        thread_id = i
+        thread_obj = threading.Thread(
+            target=scatter_thread,
+            args=(
+                thread_id,
+                num_threads,
+                num_points,
+                num_offsets,
+                num_tiles_per_pt,
+                tile_feat_size,
+                bulk_feat_size,
+                out_mask,
+                gemm_buffers,
+                outputs
+            )
+        )
+        threads_list.append(thread_obj)
+        thread_obj.start()
+
+    for thread_obj in threads_list:
+        thread_obj.join()
+
+    # 'outputs' array has been modified by the worker threads.
 
