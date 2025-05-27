@@ -33,8 +33,6 @@ try:
     print("Successfully imported minuet_cpp_module.")
 except ImportError as e:
     print(f"Error importing minuet_cpp_module: {e}")
-    print("Please ensure the module is built and in the Python path.")
-    print("Checked common locations but failed. Verify your CMake build output directory.")
     sys.exit(1)
 
 # --- Configuration Loading ---
@@ -48,15 +46,10 @@ if args.config:
     config_file_path = args.config
     print(f"Using configuration file from command line: {config_file_path}")
 else:
-    # Default behavior: try to find config.json in the project root
-    # (parent directory of the directory containing this script if this script is in c++)
-    script_dir_for_config = os.path.dirname(os.path.abspath(__file__))
-    project_root_dir_for_config = os.path.abspath(os.path.join(script_dir_for_config, '..'))
-    config_file_path = os.path.join(project_root_dir_for_config, "config.json")
-    print(f"Config file not provided via command line. Using default path: {config_file_path}")
+    print(f"Config file not provided via command line.")
+    sys.exit(1)
 
 # Add project_root_dir to sys.path for Python utility modules like minuet_mapping
-# This needs to be defined before the try-except block for imports
 project_root_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if project_root_dir not in sys.path:
     sys.path.insert(0, project_root_dir) # Insert at high priority
@@ -70,7 +63,7 @@ if os.path.exists(config_file_path):
         cpp_config = minuet_cpp.get_global_config()
         print(f"  C++ Config NUM_THREADS: {cpp_config.NUM_THREADS}")
         print(f"  C++ Config I_BASE: {hex(cpp_config.I_BASE)}")
-        # print(f"  C++ Config output_dir: {cpp_config.output_dir}") # output_dir is not directly on MinuetConfigReader yet
+        print(f"  C++ Config output_dir: {cpp_config.output_dir}") 
     else:
         print(f"Failed to load configuration from {config_file_path} into C++ module.")
         sys.exit(1)
@@ -239,29 +232,6 @@ def main():
             print(f"  [{o_idx}] {hex(o_key)} (Matches: {len(kernel_map_result_cpp[o_key])})")
         print("Slot array (derived from C++ KernelMapType iteration order):", slot_array)
 
-    # Python's greedy_group and create_in_out_masks will be used.
-    # They need the kmap (now kernel_map_result_cpp), offsets_active, and slot_array.
-    # The values in kernel_map_result_cpp are lists of C++ pair-like objects,
-    # which should be usable by the Python functions if they access elements via indexing (e.g., pair[0], pair[1]).
-    
-    # Prepare 'slots' argument for greedy_group_cpp. It expects a list of integers.
-    # slot_array was previously created as: slot_array.append(len(matches_list))
-    # This 'slot_array' is the list of slot sizes.
-    # Ensure slot_array is sorted in descending order as expected by greedy_group_cpp
-    # (The C++ version currently assumes this precondition based on Python's behavior)
-    # If kernel_map_result_cpp.items() gives items sorted by key (offset_key_int),
-    # and we want to group based on slot sizes (match list lengths), we need to sort slot_array.
-    # However, the Python greedy_group took the kmap, offsets_active, and slot_array.
-    # The C++ `greedy_group_cpp` takes only the list of slot sizes.
-    # Let's use the 'slot_array' which contains lengths of match lists.
-    # The Python greedy_group sorts this internally if it's passed as a dictionary.
-    # The C++ version expects a pre-sorted list of slot sizes.
-    
-    # Create the list of slot sizes (lengths of match lists)
-    # The original python greedy_group took `kernel_map_result_cpp, offsets_active, slot_array`
-    # The C++ `greedy_group_cpp` takes `slots` (a list of integers, assumed sorted descending).
-    # `slot_array` here is already the list of match list lengths, corresponding to `offsets_active`.
-    # We need to sort `slot_array` in descending order for the C++ function.
     cpp_slots_arg = sorted(slot_array, reverse=True)
 
     print(f"Calling C++ greedy_group_cpp with {len(cpp_slots_arg)} slot sizes.")

@@ -427,17 +427,15 @@ def gather_thread(
     # Arguments defining this thread's share of work
     log_tid: int, 
     num_threads: int, 
-
     # Original processing parameters (passed through)
     num_points: int,
+    num_offsets: int,
     num_tiles_per_pt: int, 
     tile_feat_size: int, 
     bulk_feat_size: int,     
-    offsets: list[int], # List of offsets with atleast one match. The index should be global index in offset list.
-    offset_cumsum_pad: list, 
     source_masks: list,
     sources: list,
-    source_buffers: list # Shared output list/array, modified by this worker
+    gemm_buffers: list # Shared output list/array, modified by this worker
 ):
     """
     The function executed by each Python thread.
@@ -485,58 +483,44 @@ def gather_thread(
                     tile_data[tile_data_idx] = sources[gsrc_idx]
             
             # 2. STORE PHASE for the currently loaded tile
-            for off_idx, off_key in enumerate(offsets): 
-                mask_idx = off_key * num_points + pt_idx 
+            for off_idx in range(num_offsets): 
+                mask_idx = off_idx * num_points + pt_idx 
                 
                 assert(0 <= mask_idx < len(source_masks))
                 
-                dest_slot_relidx = source_masks[mask_idx] 
+                dest_slot = source_masks[mask_idx] 
                 
-                if dest_slot_relidx == (-1,-1): continue # Offset not present for this point
-                # This assert remains valid as offset_cumsum_pad is still indexed by off_idx
-                assert(0 <= off_idx < len(offset_cumsum_pad))
+                if dest_slot == -1:  continue # Offset not present
                 
-                # MODIFIED LOGIC FOR dest_slot_base:
-                # Assumes offset_cumsum_pad[off_idx] is the base *feature* address for this offset config's block,
-                # and dest_slot_relidx is the local *slot* index (0-indexed) of the point within this block.
-                dest_slot_base = (offset_cumsum_pad[off_idx] + dest_slot_relidx[1]) * total_feats_per_pt
+                dest_tile_base_in_slot = tile_idx_in_pt * tile_feat_size
+                dest_tile_first_bulk_idx_in_slot = dest_tile_base_in_slot // bulk_feat_size
 
-                if tile_feat_size > 0:
-
-                    dest_tile_base_in_slot = tile_idx_in_pt * tile_feat_size
-                    dest_tile_first_bulk_idx_in_slot = 0
+                for bulk_idx in range(num_bulks_per_tile): 
+                    dest_bulk_idx_in_slot = dest_tile_first_bulk_idx_in_slot + bulk_idx
+                    tile_data_bulk_lsrc = bulk_idx * bulk_feat_size
+                    vstore_addr = dest_slot*total_feats_per_pt + dest_bulk_idx_in_slot * bulk_feat_size
                     
-                    if bulk_feat_size > 0: # Avoid division by zero
-                        dest_tile_first_bulk_idx_in_slot = dest_tile_base_in_slot // bulk_feat_size
-
-                    for bulk_offset_in_tile in range(num_bulks_per_tile): 
-                        dest_bulk_idx_in_slot = dest_tile_first_bulk_idx_in_slot + bulk_offset_in_tile
-                        tile_data_bulk_lsrc = bulk_offset_in_tile * bulk_feat_size
-                        vstore_addr = dest_slot_base + dest_bulk_idx_in_slot * bulk_feat_size
-                        
-                        for elem_idx_in_bulk in range(bulk_feat_size): 
-                            tile_data_idx = tile_data_bulk_lsrc + elem_idx_in_bulk 
-                            out_buf_gdest_idx = vstore_addr + elem_idx_in_bulk 
-                            assert(0 <= out_buf_gdest_idx < len(source_buffers))                             
-                            assert(0 <= tile_data_idx < len(tile_data))
-                            #    0 <= tile_data_idx < len(tile_data):
-                            source_buffers[out_buf_gdest_idx] = tile_data[tile_data_idx]
+                    for elem_idx_in_bulk in range(bulk_feat_size): 
+                        tile_data_idx = tile_data_bulk_lsrc + elem_idx_in_bulk 
+                        out_buf_gdest_idx = vstore_addr + elem_idx_in_bulk 
+                        assert(0 <= out_buf_gdest_idx < len(gemm_buffers))                             
+                        assert(0 <= tile_data_idx < len(tile_data))
+                        #    0 <= tile_data_idx < len(tile_data):
+                        gemm_buffers[out_buf_gdest_idx] = tile_data[tile_data_idx]
 
 # Main function to orchestrate the threaded execution
 def python_threaded_gather_simulation(
     # Parameters defining the data and processing
-    num_points: int,
-    num_tiles_per_pt: int, 
-    tile_feat_size: int, 
-    bulk_feat_size: int, 
-    num_threads: int, 
-    # Data arrays
-    offsets: list[int],
-    offset_cumsum_pad: list, 
-    source_masks: list,
-    sources: list,
-    source_buffers: list # Output buffer that will be modified
-) -> None:
+        num_threads: int,
+        num_points: int,
+        num_offsets: int, 
+        num_tiles_per_pt: int,
+        tile_feat_size: int,
+        bulk_feat_size: int,
+        source_masks: list,
+        sources: list,
+        gemm_buffers: list
+    ) -> None:
     """
     Orchestrates the gather operation using multiple Python threads.
     """
@@ -569,16 +553,17 @@ def python_threaded_gather_simulation(
                 log_tid,
                 num_threads,
                 num_points,
+                num_offsets,
                 num_tiles_per_pt,
                 tile_feat_size,
                 bulk_feat_size,
-                offsets,
-                offset_cumsum_pad,
                 source_masks,
                 sources,
-                source_buffers 
+                gemm_buffers 
             )
         )
+        
+        
         threads_list.append(thread_obj)
         thread_obj.start() # Start the thread's execution
 
@@ -586,8 +571,8 @@ def python_threaded_gather_simulation(
     for thread_obj in threads_list: # Use updated threads_list
         thread_obj.join()
 
-    # At this point, 'source_buffers' has been modified by the worker threads.
-    # No explicit return is needed if 'source_buffers' was intended to be modified in-place.
+    # At this point, 'gemm_buffers' has been modified by the worker threads.
+    # No explicit return is needed if 'gemm_buffers' was intended to be modified in-place.
 
 # --- Example Usage (Illustrative) ---
 if __name__ == '__main__':
@@ -612,53 +597,28 @@ if __name__ == '__main__':
     _src_masks_data = [-1]*(_num_pts * _n_offsets) # Placeholder for source masks
     # First offset has local indices for the first 4 points, rest are -1
     # Second offset has local indices for the last 4 points, rest are -1
-    _src_masks_data = [(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1),(-1,-1), \
-                       (0,0),(1,1),(2,2),(3,3),(-1,-1),(-1,-1),(-1,-1)]                  
-    _offsets_cumsum = [0]*(_n_offsets+1) # Placeholder for cumulative offsets
+    _src_masks_data = [0, -1, -1, -1, -1, -1, -1,-1,
+                       4,  1,  2,  3,  -1, -1, -1, -1]
+    
+    _src_bufs_data = [0.0] * (5 * _num_tiles * _tile_feats)  # Initialize output buffers     
 
-    # Populate the cumulative offsets based on the source masks. 
-    # Converting to sparse offset representation.
-    # e.g., here only offset 1 has active slots for the first 4 points.
-    # We want to thus have [0].
-    
-    for o in range(_n_offsets):
-        # Count the number of active slots for this offset
-        num_active_slots = sum(1 for i in _src_masks_data[o * _num_pts:(o + 1) * _num_pts] if i != -1)
-        _offsets_cumsum[o + 1] = _offsets_cumsum[o] + (num_active_slots)
-    required_buffer_size = _offsets_cumsum[-1] # Total size needed for source_buffers
-    
-    _src_bufs_data = [0.0] * (required_buffer_size * _total_feats_pt + _total_feats_pt) # Add some padding
-    
-    _processed_offsets_cumsum = [_offsets_cumsum[0]]
-    for i in range(1, len(_offsets_cumsum)):
-        if _offsets_cumsum[i] != _offsets_cumsum[i-1]:
-            _processed_offsets_cumsum.append(_offsets_cumsum[i])
-    _offsets_cumsum = _processed_offsets_cumsum
-
-    # Remove 0d offsets from cumsum
-    # If neighbor and self offsets are same do not include 
-    # [0 0 4]. List as [0 4]
-    
-    
-    
     print(f"Starting Python threaded simulation with {_n_threads} threads...")
-    print(f"Initial sum of source_buffers: {sum(_src_bufs_data)}")
+    print(f"Initial sum of gemm_buffers: {sum(_src_bufs_data)}")
 
     python_threaded_gather_simulation(
+        num_threads=_n_threads,  # Updated parameter name
         num_points=_num_pts,
+        num_offsets = _n_offsets,
         num_tiles_per_pt=_num_tiles,
         tile_feat_size=_tile_feats,
         bulk_feat_size=_bulk_feats,
-        num_threads=_n_threads, # Updated parameter name
-        offsets=[1],
-        offset_cumsum_pad=_offsets_cumsum, # Updated parameter name
         source_masks=_src_masks_data,
         sources=_src_data,
-        source_buffers=_src_bufs_data
+        gemm_buffers=_src_bufs_data
     )
 
     print("Python threaded simulation finished.")
-    print(f"Final sum of source_buffers: {sum(_src_bufs_data)}")
+    print(f"Final sum of gemm_buffers: {sum(_src_bufs_data)}")
     # Add more checks here if needed, e.g., print parts of the buffer.
     
     

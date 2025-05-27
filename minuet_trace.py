@@ -80,25 +80,16 @@ if __name__ == '__main__':
     map_trace_checksum = write_gmem_trace(output_dir+'map_trace.bin.gz')
     write_kernel_map_to_gz(kmap, output_dir+'kernel_map.bin.gz', off_coords)
 
-    ########################################################################################################################################################
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
 
-### Create Metadatas for kernel map
-#### - First sort the list of offsets based on the length of matches
-#### - Create an in, out mask for gather scatter [#Total slots * #Total points]
-#### - mask[offset_idx][point_idx] = -1 (if not matched) otherwise the position of input in original input array. The points in slot array are listed based on sorted order of coordinates.
-#### - offsets_active is a sparse list of offsets that have atleast one match
-#### - slot_array is number of slots for each offset.
-
     # No need to sort kmap as it's already a SortedByValueLengthDict
-    # Initialize offsets_active directly from keys of kmap (they're already sorted by match count)
+    # Sparse list of offsets with matches
     offsets_active = list(kmap._get_sorted_keys())
-    
-    # Initialize slot_array with lengths of match lists
+
+    # Number of slots required by each offset
     slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
     
-    debug = True
     if debug:
         print("Offsets sorted by matches count:", offsets_active)
         print("Slot array:", slot_array)
@@ -111,28 +102,26 @@ if __name__ == '__main__':
         max_group=GEMM_WT_GROUP,
         max_slots=GEMM_SIZE,
     )
+    
+    # Dictionary with offsets active and position in global buffer.
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
 
     # Generate masks with global idx.
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
 
-    write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
+    # Write metadata to file
+    metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
 
 
-    print(out_mask, in_mask)
+    # Ready for scatter simulation
+
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")
     gemm_buffer = np.zeros(total_slots*TOTAL_FEATS_PT, dtype=np.uint16)
    
-    print(in_mask)
-    for i in range(in_mask.size):
-        offset_idx = i//len(uniq_coords)
-        point_idx = i%len(uniq_coords)
-        if in_mask[i] != -1:
-            print(f"Writing to buffer: {offset_idx}, {point_idx}, {in_mask[i]}")
-        
-
+    
+            
 
     # python_threaded_gather_simulation(
     #     num_points=len(uniq_coords),
@@ -148,40 +137,18 @@ if __name__ == '__main__':
     # )
 
 
-    # write_metadata_to_gz(out_mask, in_mask, slot_dict, slot_array, total_slots) 
-    # from minuet_gather import create_in_out_masks
-    # out_mask, in_mask, offsets_active, slot_array, metadata_checksum = create_in_out_masks(idx_kmap, len(off_coords), len(in_coords), len(uniq_coords))
-    
 
-
-    # if debug:
-    #     print(out_mask)
-    #     print(in_mask)
-    #     print(offsets_active)
-    #     print(slot_array)
-        
-    # matches = 0
-    # for entry, item in out_mask.items():
-    #     matches += len(item)
-    # print(f"Total matches: {matches} out of {len(off_coords)*len(in_coords)}")
-    # print(f"Metadata Checksum: {metadata_checksum}")
-
-    
-    
-
-    debug = True
     
     if debug:
         print("Groups metadata ([start, end], base, req, alloc):")
-    for g in groups:
-        print(g)    
-    print("GEMM List:")
-    for g in gemm_list:
-        print(g)
+        for g in groups:
+            print(g)    
+        print("GEMM List:")
+        for g in gemm_list:
+            print(g)
 
     if debug:
         print(gemm_list)
-
         # Print total space allocated by groups
         total_alloc = sum(g[3] for g in groups)
         print(f"\nTotal allocated space: {total_alloc} slots")
@@ -196,7 +163,7 @@ if __name__ == '__main__':
     # Write all checksums to file as json
     checksums = {
         "map_trace.bin.gz": map_trace_checksum,
-        # "metadata.bin.gz": metadata_checksum,
+        "metadata.bin.gz": metadata_checksum,
         "gemms.bin.gz": gemm_checksum,
     }
     
