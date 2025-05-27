@@ -700,56 +700,57 @@ def scatter_thread(
 
     # pt_idx here refers to an *output* point index
     for pt_idx in range(thread_id, num_points, num_threads):
-        output_pt_base = pt_idx * total_feats_per_pt
+        dest_pt_base = pt_idx * total_feats_per_pt
 
         for tile_idx in range(num_tiles_per_pt):
-            output_tile_base = output_pt_base + tile_idx * tile_feat_size # Base for current output tile
+            dest_tile_base = dest_pt_base + tile_idx * tile_feat_size # Base for current output tile
 
             for off_idx in range(num_offsets):
+                # mask_idx uses num_points, which is the number of output points for scatter
                 mask_idx = off_idx * num_points + pt_idx
-                gemm_slot = out_mask[mask_idx]
+                source_slot = out_mask[mask_idx]
 
-                if gemm_slot == -1:
+                if source_slot == -1:
                     continue
 
-                gemm_buffer_source_tile_base = gemm_slot * total_feats_per_pt + tile_idx * tile_feat_size
+                source_tile_base = source_slot * total_feats_per_pt + tile_idx * tile_feat_size
                 
                 # Initialize a temporary buffer for the tile
-                temp_tile_buffer = [0.0] * tile_feat_size
+                tile_data = [0.0] * tile_feat_size
 
-                # --- Phase 1: Read entire source tile from gemm_buffers into temp_tile_buffer ---
-                for b_load in range(num_bulks):
-                    bulk_offset_in_tile = b_load * bulk_feat_size
-                    gemm_bulk_source_addr_global = gemm_buffer_source_tile_base + bulk_offset_in_tile
+                # --- Phase 1: Read entire source tile from gemm_buffers into tile_data ---
+                for b in range(num_bulks):
+                    bulk_offset = b * bulk_feat_size
+                    source_bulk_addr = source_tile_base + bulk_offset
                     
                     # Record read access
-                    record_local(thread_id, mapping_module.OPS['R'], minuet_config.GM_BASE + gemm_bulk_source_addr_global * minuet_config.SIZE_FEAT)
+                    record_local(thread_id, mapping_module.OPS['R'], minuet_config.GM_BASE + source_bulk_addr * minuet_config.SIZE_FEAT)
                     
-                    # Actual data loading into temp_tile_buffer if gemm_buffers is available
+                    # Actual data loading into tile_data if gemm_buffers is available
                     if gemm_buffers is not None:
-                        source_start_idx = gemm_bulk_source_addr_global
-                        source_end_idx = gemm_bulk_source_addr_global + bulk_feat_size
+                        source_bulk_start = source_bulk_addr
+                        source_bulk_end = source_bulk_addr + bulk_feat_size
                         
                         # Assuming source indices are valid as per original logic
-                        temp_tile_buffer[bulk_offset_in_tile : bulk_offset_in_tile + bulk_feat_size] = gemm_buffers[source_start_idx:source_end_idx]
+                        tile_data[bulk_offset : bulk_offset + bulk_feat_size] = gemm_buffers[source_bulk_start:source_bulk_end]
 
-                # --- Phase 2: Write from temp_tile_buffer to outputs array ---
-                for b_store in range(num_bulks):
-                    bulk_offset_in_tile = b_store * bulk_feat_size
-                    output_bulk_dest_addr_global = output_tile_base + bulk_offset_in_tile
+                # --- Phase 2: Write from tile_data to outputs array ---
+                for b in range(num_bulks):
+                    bulk_offset = b * bulk_feat_size
+                    dest_bulk_addr = dest_tile_base + bulk_offset
                     
                     # Record write access
                     ov_base = getattr(minuet_config, 'OV_BASE', minuet_config.GM_BASE + (1 << 30)) # Placeholder for OV_BASE
-                    record_local(thread_id, mapping_module.OPS['W'], ov_base + output_bulk_dest_addr_global * minuet_config.SIZE_FEAT)
+                    record_local(thread_id, mapping_module.OPS['W'], ov_base + dest_bulk_addr * minuet_config.SIZE_FEAT)
                     
-                    # Actual data storing only if outputs is not None AND gemm_buffers was not None (i.e., temp_tile_buffer has valid data)
-                    if outputs is not None and gemm_buffers is not None:
-                        bulk_data_to_write = temp_tile_buffer[bulk_offset_in_tile : bulk_offset_in_tile + bulk_feat_size]
+                    # Actual data storing only if outputs is not None AND gemm_buffers was not None (i.e., tile_data has valid data)
+                    if outputs is not None and gemm_buffers is not None: # gemm_buffers check implies tile_data is valid
+                        bulk_to_write = tile_data[bulk_offset : bulk_offset + bulk_feat_size]
                         
-                        dest_start_idx = output_bulk_dest_addr_global
-                        dest_end_idx = output_bulk_dest_addr_global + bulk_feat_size
+                        dest_bulk_start = dest_bulk_addr
+                        dest_bulk_end = dest_bulk_addr + bulk_feat_size
                         
-                        outputs[dest_start_idx:dest_end_idx] += bulk_data_to_write
+                        outputs[dest_bulk_start:dest_bulk_end] += bulk_to_write
     flush_local_trace()
 
 # Main function to orchestrate the threaded scatter execution
