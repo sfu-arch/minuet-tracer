@@ -1,11 +1,16 @@
 #include "minuet_config.hpp"
 #include "minuet_trace.hpp"
+#include "minuet_gather.hpp" // Added for GreedyGroupResult and greedy_group_cpp
 #include <iostream>
 #include <vector>
 #include <string>
 #include <algorithm> 
-#include <numeric> // For std::iota if needed, not directly here
+#include <numeric> // For std::iota if needed
 #include <filesystem> // For create_directory
+#include <map>      // For std::map
+#include <fstream>  // For std::ofstream
+#include <iomanip>  // For std::setw
+// nlohmann/json.hpp is included via minuet_config.hpp -> ext/json.hpp
 
 // Helper to convert vector of tuples to vector of Coord3D
 std::vector<Coord3D> tuples_to_coords(const std::vector<std::tuple<int, int, int>>& tuples) {
@@ -83,16 +88,22 @@ int main(int argc, char *argv[]) {
     // Python: curr_phase = PHASES['LKP']
     // C++: curr_phase is set within perform_coordinate_lookup
     std::cout << "--- Phase: " << PHASES.inverse.at(4) << " ---" << std::endl;
-    KernelMapType kernel_map_result = perform_coordinate_lookup(
-        unique_indexed_coords, query_data.qry_keys, query_data.qry_in_idx, 
-        query_data.qry_off_idx, query_data.wt_offsets, // wt_offsets from query_data
-        tiles_pivots_data.tiles, tiles_pivots_data.pivots, g_config.NUM_PIVOTS // tile_size = 2
+    // KernelMapType kernel_map_result = perform_coordinate_lookup( // This line is modified below
+    KernelMapType kernel_map_result_obj(false); // Create kmap, false for sorting order (desc by value size)
+    kernel_map_result_obj = perform_coordinate_lookup( // Pass by reference (this is the kmap)
+        unique_indexed_coords, 
+        query_data.qry_keys, 
+        query_data.qry_in_idx, 
+        query_data.qry_off_idx, 
+        query_data.wt_offsets,
+        tiles_pivots_data.tiles, 
+        tiles_pivots_data.pivots, 
+        g_config.NUM_TILES // num_tiles_config parameter
     );
-    // curr_phase = ""; // Clear phase
     set_curr_phase(""); // Clear phase
 
     // --- Print Debug Information (if enabled) ---
-    if (get_debug_flag()) { // Use get_debug_flag() which uses g_config.debug
+    if (get_debug_flag()) {
         std::cout << "\\nSorted Source Array (Coordinate, Original Index):" << std::endl;
         for (const auto& idxc_item : unique_indexed_coords) {
             std::cout << "  key=" << to_hex_string(idxc_item.to_key()) // Changed from idxc_item.coord.to_key()
@@ -134,10 +145,12 @@ int main(int argc, char *argv[]) {
         }
 
         std::cout << "\nKernel Map:" << std::endl;
-        if (kernel_map_result.empty()) {
+        if (kernel_map_result_obj.empty()) {
             std::cout << "  Kernel map is empty." << std::endl;
         }
-        for (const auto& kmap_pair : kernel_map_result) { // Renamed pair to kmap_pair
+        // Iterate using get_sorted_items to respect the map's internal sort order (desc by value size)
+        auto sorted_kmap_debug_items = kernel_map_result_obj.get_sorted_items();
+        for (const auto& kmap_pair : sorted_kmap_debug_items) { 
             Coord3D offset_as_coord = Coord3D::from_signed_key(kmap_pair.first);
             std::cout << "  Offset " << offset_as_coord << " (Key: " << to_hex_string(kmap_pair.first) << "):";
             if (kmap_pair.second.empty()) {
@@ -186,44 +199,196 @@ int main(int argc, char *argv[]) {
         std::cout << "Created output directory: " << g_config.output_dir << std::endl;
     }
 
+    uint32_t map_trace_checksum = 0;
+    uint32_t kernel_map_checksum = 0;
+
     try {
-        write_gmem_trace(g_config.output_dir + "map_trace.bin.gz"); // Use g_config.output_dir
-        write_kernel_map_to_gz(kernel_map_result, g_config.output_dir + "kernel_map.bin.gz", offset_coords); // Use g_config.output_dir
+        map_trace_checksum = write_gmem_trace(g_config.output_dir + "map_trace.bin.gz"); 
+        kernel_map_checksum = write_kernel_map_to_gz(kernel_map_result_obj, g_config.output_dir + "kernel_map.bin.gz", offset_coords);
     } catch (const std::exception& e) {
         std::cerr << "Error during file writing: " << e.what() << std::endl;
         return 1;
     }
 
-    std::cout << "\nC++ Minuet mapping trace generation complete." << std::endl;
+    std::cout << "\\nC++ Minuet mapping trace generation complete." << std::endl;
 
-    // --- Start of Gather Logic Integration ---
-    std::cout << "\n--- Minuet Gather (C++) ---" << std::endl;
+    // --- Start of Gather/Scatter Metadata (mirroring Python minuet_trace.py) ---
+    std::cout << "\\n--- Phase: Gather/Scatter Metadata (C++) ---" << std::endl;
 
-    // 1. Prepare offsets_active and slots (mimicking Python's minuet_gather.py logic)
-    std::vector<std::pair<int, size_t>> offset_counts; // pair: {offset_idx, count}
-    // Iterate using get_sorted_items() to respect the SortedByValueSizeMap order if needed here
-    // or iterate the underlying map if key order is preferred for this step.
-    // For preparing offsets_active_cpp and slots_cpp, Python sorts kmap by len(matches) descending.
-    // Our KernelMapType is already sorted this way (if initialized with ascending=false).
-    auto sorted_kmap_items = kernel_map_result.get_sorted_items();
-    for(const auto& entry : sorted_kmap_items) {
-        offset_counts.push_back({entry.first, entry.second.size()});
-    }
-    // The sorting done in Python: offsets_active = list(kmap._get_sorted_keys())
-    // slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
-    // Our KernelMapType(false) should already provide keys in descending order of value size.
+    std::vector<uint32_t> offsets_active_cpp;
+    std::vector<int> slot_array_cpp; 
 
-    std::vector<int> offsets_active_cpp;
-    std::vector<int> slots_cpp; // slot counts for offsets_active_cpp
-    // We iterate through sorted_kmap_items which is already sorted by match count (descending)
-    for(const auto& oc_pair : sorted_kmap_items) { // oc_pair is std::pair<const Key, ValueContainer>
-        if (!oc_pair.second.empty()) { // Only consider offsets with actual matches
-            offsets_active_cpp.push_back(oc_pair.first);
-            slots_cpp.push_back(oc_pair.second.size());
+    // kernel_map_result_obj is already sorted by value size (descending) due to KernelMapType(false)
+    auto sorted_kmap_items_for_active = kernel_map_result_obj.get_sorted_items(); 
+    for (const auto& item : sorted_kmap_items_for_active) {
+        if (!item.second.empty()) {
+            offsets_active_cpp.push_back(item.first); 
+            slot_array_cpp.push_back(static_cast<int>(item.second.size())); 
         }
     }
 
-    // ... existing gather logic continues ...
+    if (g_config.debug) {
+        std::cout << "Offsets active (derived from C++ KernelMapType iteration order, desc by match count):" << std::endl;
+        for (size_t o_idx = 0; o_idx < offsets_active_cpp.size(); ++o_idx) {
+            std::cout << "  [" << o_idx << "] " << to_hex_string(offsets_active_cpp[o_idx])
+                      << " (Matches: " << slot_array_cpp[o_idx] << ")" << std::endl;
+        }
+        std::cout << "Slot array (ordered by match count desc): [";
+        for(size_t i=0; i<slot_array_cpp.size(); ++i) {
+            std::cout << slot_array_cpp[i] << (i == slot_array_cpp.size()-1 ? "" : ", ");
+        }
+        std::cout << "]" << std::endl;
+    }
+
+    std::vector<int> cpp_slots_arg_for_greedy_group = slot_array_cpp; 
+
+    std::cout << "Calling C++ greedy_group_cpp with " << cpp_slots_arg_for_greedy_group.size() << " slot sizes." << std::endl;
+    if (g_config.debug && !cpp_slots_arg_for_greedy_group.empty()) {
+        std::cout << "  Slot sizes for C++ greedy_group_cpp (sorted desc): [";
+        for(size_t i=0; i < std::min(cpp_slots_arg_for_greedy_group.size(), static_cast<size_t>(10)); ++i) {
+             std::cout << cpp_slots_arg_for_greedy_group[i] << (i == std::min(cpp_slots_arg_for_greedy_group.size(), static_cast<size_t>(10))-1 || i == cpp_slots_arg_for_greedy_group.size()-1 ? "" : ", ");
+        }
+        if (cpp_slots_arg_for_greedy_group.size() > 10) std::cout << "...";
+        std::cout << "]" << std::endl;
+    }
+
+    GreedyGroupResult greedy_group_result_cpp = greedy_group_cpp(
+        cpp_slots_arg_for_greedy_group,
+        g_config.GEMM_ALIGNMENT,
+        g_config.GEMM_WT_GROUP,
+        g_config.GEMM_SIZE
+    );
+
+    std::vector<uint64_t> slot_indices_cpp = greedy_group_result_cpp.pos_indices;
+    int total_slots_cpp = greedy_group_result_cpp.total_slots_allocated;
+    uint32_t gemm_checksum_cpp = greedy_group_result_cpp.checksum;
+
+    std::map<uint32_t, int> slot_dict_cpp;
+    for (size_t i = 0; i < offsets_active_cpp.size(); ++i) {
+        slot_dict_cpp[offsets_active_cpp[i]] = slot_indices_cpp[i];
+    }
+
+    uint32_t num_total_system_offsets_cpp = static_cast<uint32_t>(offset_coords.size());
+    uint32_t num_total_system_sources_cpp = static_cast<uint32_t>(unique_indexed_coords.size());
+
+    std::vector<int32_t> out_mask_cpp(static_cast<size_t>(num_total_system_offsets_cpp) * num_total_system_sources_cpp, -1);
+    std::vector<int32_t> in_mask_cpp(static_cast<size_t>(num_total_system_offsets_cpp) * num_total_system_sources_cpp, -1);
+
+    std::map<uint32_t, uint32_t> offset_key_to_dense_idx_map;
+    for (uint32_t i = 0; i < offset_coords.size(); ++i) {
+        offset_key_to_dense_idx_map[offset_coords[i].to_key()] = i;
+    }
+
+    for (const auto& k_item : sorted_kmap_items_for_active) { 
+        uint32_t offset_key = k_item.first;
+        const auto& matches_list = k_item.second;
+
+        if (matches_list.empty()) continue;
+
+        auto it_slot_dict = slot_dict_cpp.find(offset_key);
+        if (it_slot_dict == slot_dict_cpp.end()) {
+            std::cerr << "Warning: Offset key " << to_hex_string(offset_key) << " from kernel_map not found in slot_dict_cpp." << std::endl;
+            continue;
+        }
+        int base_slot_for_offset = it_slot_dict->second;
+
+        auto it_dense_idx = offset_key_to_dense_idx_map.find(offset_key);
+        if (it_dense_idx == offset_key_to_dense_idx_map.end()) {
+            std::cerr << "Warning: Offset key " << to_hex_string(offset_key) << " from kernel_map not found in offset_key_to_dense_idx_map (original offset_coords)." << std::endl;
+            continue;
+        }
+        uint32_t dense_offset_idx = it_dense_idx->second;
+
+        for (size_t slot_in_offset = 0; slot_in_offset < matches_list.size(); ++slot_in_offset) {
+            int in_idx = matches_list[slot_in_offset].first;
+            int q_src_idx = matches_list[slot_in_offset].second;
+
+            if (dense_offset_idx < num_total_system_offsets_cpp && static_cast<uint32_t>(in_idx) < num_total_system_sources_cpp && in_idx >=0) {
+                out_mask_cpp[dense_offset_idx * num_total_system_sources_cpp + static_cast<uint32_t>(in_idx)] = static_cast<int32_t>(slot_in_offset);
+            }
+
+            int32_t global_slot_idx = static_cast<int32_t>(base_slot_for_offset + slot_in_offset);
+            if (dense_offset_idx < num_total_system_offsets_cpp && static_cast<uint32_t>(q_src_idx) < num_total_system_sources_cpp && q_src_idx >=0) {
+                in_mask_cpp[dense_offset_idx * num_total_system_sources_cpp + static_cast<uint32_t>(q_src_idx)] = global_slot_idx;
+            }
+        }
+    }
+    
+    std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> active_offset_data_for_cpp;
+    for (size_t i = 0; i < offsets_active_cpp.size(); ++i) {
+        uint32_t offset_key = offsets_active_cpp[i];
+        uint32_t base_addr = static_cast<uint32_t>(slot_dict_cpp.at(offset_key)); 
+        uint32_t num_matches = static_cast<uint32_t>(cpp_slots_arg_for_greedy_group[i]); 
+        active_offset_data_for_cpp.emplace_back(offset_key, base_addr, num_matches);
+    }
+
+    std::string metadata_filename_cpp = g_config.output_dir + "/metadata.bin.gz"; // Added path separator
+    std::cout << "Writing metadata to " << metadata_filename_cpp << " using C++ implementation." << std::endl;
+
+    uint32_t metadata_checksum_cpp = write_metadata_cpp(
+        out_mask_cpp,
+        in_mask_cpp,
+        active_offset_data_for_cpp,
+        num_total_system_offsets_cpp,
+        num_total_system_sources_cpp,
+        static_cast<uint32_t>(total_slots_cpp),
+        metadata_filename_cpp
+    );
+    std::cout << "C++ calculated CRC32 for metadata: " << to_hex_string(metadata_checksum_cpp) << std::endl;
+
+    nlohmann::json checksums_json;
+    checksums_json["map_trace_cpp.bin.gz"] = to_hex_string(map_trace_checksum);
+    checksums_json["kernel_map_cpp.bin.gz"] = to_hex_string(kernel_map_checksum);
+    checksums_json["gemms.bin.gz"] = to_hex_string(gemm_checksum_cpp); // This is from greedy_group_result_cpp.checksum
+    checksums_json["metadata.bin.gz"] = to_hex_string(metadata_checksum_cpp);
+
+    std::string checksum_filename_cpp = g_config.output_dir + "/checksums_cpp.json"; // Added path separator
+    std::ofstream checksum_file(checksum_filename_cpp);
+    if (checksum_file.is_open()) {
+        checksum_file << std::setw(2) << checksums_json << std::endl;
+        checksum_file.close();
+        std::cout << "Checksums written to " << checksum_filename_cpp << std::endl;
+    } else {
+        std::cerr << "Error: Unable to open " << checksum_filename_cpp << " for writing." << std::endl;
+    }
+
+    if (g_config.debug) {
+        std::cout << "In_mask_cpp (first few elements): [";
+        for(size_t i=0; i < std::min(in_mask_cpp.size(), static_cast<size_t>(20)); ++i) {
+            std::cout << in_mask_cpp[i] << (i == std::min(in_mask_cpp.size(), static_cast<size_t>(20))-1 || i == in_mask_cpp.size()-1 ? "" : ", ");
+        }
+        if (in_mask_cpp.size() > 20) std::cout << "...";
+        std::cout << "]" << std::endl;
+
+        std::cout << "Groups metadata (from C++ GreedyGroupResult):" << std::endl;
+        for(const auto& g_info : greedy_group_result_cpp.groups) {
+            std::cout << "  Members: [";
+            for(size_t i=0; i<g_info.members.size(); ++i) std::cout << g_info.members[i] << (i==g_info.members.size()-1 ? "" : ", ");
+            std::cout << "], BaseAddr: " << g_info.base_addr
+                      << ", ReqSlots: " << g_info.required_slots
+                      << ", AllocSlots: " << g_info.allocated_slots << std::endl;
+        }
+        std::cout << "GEMM List (from C++ GreedyGroupResult):" << std::endl;
+        for(const auto& gemm_info_item : greedy_group_result_cpp.gemm_list) {
+            std::cout << "  NumOffsets: " << gemm_info_item.num_offsets
+                      << ", Gemm_M: " << gemm_info_item.gemm_M
+                      << ", Slots: " << gemm_info_item.slots
+                      << ", Padding: " << gemm_info_item.padding << std::endl;
+        }
+        std::cout << "\\nTotal allocated space (from C++): " << total_slots_cpp << " slots" << std::endl;
+
+        std::cout << "\\nPer-position slot indices (from C++ for sorted slot sizes): [";
+        for(size_t i=0; i<slot_indices_cpp.size(); ++i) {
+            std::cout << slot_indices_cpp[i] << (i==slot_indices_cpp.size()-1 ? "" : ", ");
+        }
+        std::cout << "]" << std::endl;
+    }
+
+    // --- Start of Gather Logic Integration ---
+    // This comment and the code below it seems to be a leftover from a previous state or a duplicate thought process.
+    // The gather logic has been implemented above.
+    // std::cout << "\\n--- Minuet Gather (C++) ---" << std::endl;
+    // ... remove duplicated or obsolete gather logic here ...
 
     return 0;
 }
