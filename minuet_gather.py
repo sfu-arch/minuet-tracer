@@ -606,58 +606,8 @@ def mt_gather(
     # At this point, 'gemm_buffers' has been modified by the worker threads.
     # No explicit return is needed if 'gemm_buffers' was intended to be modified in-place.
 
-# --- Example Usage (Illustrative) ---
-if __name__ == '__main__':
-    # Define some example parameters and data
-    # Note: For a real test, these would need to be appropriately sized and valued.
-    _num_pts = 8  
-    _num_tiles = 4 
-    _tile_feats = 16 
-    _bulk_feats = 4  
-    _n_threads = 2 
-    _n_offsets = 2 
-    _total_feats_pt = _num_tiles * _tile_feats 
-    
-    # Initialize dummy data
-    # For 'sources', ensure enough data for all points and their features
-    _src_data = [float(i) for i in range(_num_pts * _total_feats_pt)] 
-    
-    # 'source_masks' needs to be [num_offsets * num_points]
-    # Example: if create_in_out_masks is fixed, this would be populated by local indices.
-    # For this standalone example, let's simulate source_masks providing local slot indices (0 or -1 for simplicity here)
-    
-    _src_masks_data = [-1]*(_num_pts * _n_offsets) # Placeholder for source masks
-    # First offset has local indices for the first 4 points, rest are -1
-    # Second offset has local indices for the last 4 points, rest are -1
-    _src_masks_data = [0, -1, -1, -1, -1, -1, -1,-1,
-                       4,  1,  2,  3,  -1, -1, -1, -1]
-    
-    _src_bufs_data = [0.0] * (5 * _num_tiles * _tile_feats)  # Initialize output buffers     
 
-    print(f"Starting Python threaded simulation with {_n_threads} threads...")
-    print(f"Initial sum of gemm_buffers: {sum(_src_bufs_data)}")
-
-    mt_gather(
-        num_threads=_n_threads,  # Updated parameter name
-        num_points=_num_pts,
-        num_offsets = _n_offsets,
-        num_tiles_per_pt=_num_tiles,
-        tile_feat_size=_tile_feats,
-        bulk_feat_size=_bulk_feats,
-        source_masks=_src_masks_data,
-        sources=_src_data,
-        gemm_buffers=_src_bufs_data
-    )
-
-    print("Python threaded simulation finished.")
-    print(f"Final sum of gemm_buffers: {sum(_src_bufs_data)}")
-    # Add more checks here if needed, e.g., print parts of the buffer.
-    
-    for entry in minuet_config.mem_trace:
-        print(entry)
-
-
-# Scatter operation: thread function
+# scatter operation: thread function
 def scatter_thread(
     thread_id: int,
     num_threads: int,
@@ -701,17 +651,17 @@ def scatter_thread(
     # pt_idx here refers to an *output* point index
     for pt_idx in range(thread_id, num_points, num_threads):
         dest_pt_base = pt_idx * total_feats_per_pt
-
-        for tile_idx in range(num_tiles_per_pt):
-            dest_tile_base = dest_pt_base + tile_idx * tile_feat_size # Base for current output tile
-
-            for off_idx in range(num_offsets):
-                # mask_idx uses num_points, which is the number of output points for scatter
-                mask_idx = off_idx * num_points + pt_idx
-                source_slot = out_mask[mask_idx]
-
-                if source_slot == -1:
+        
+        for off_idx in range(num_offsets):
+            mask_idx = off_idx * num_points + pt_idx
+            source_slot = out_mask[mask_idx]
+            if source_slot == -1:
                     continue
+
+            for tile_idx in range(num_tiles_per_pt):
+                dest_tile_base = dest_pt_base + tile_idx * tile_feat_size # Base for current output tile
+
+                # mask_idx uses num_points, which is the number of output points for scatter
 
                 source_tile_base = source_slot * total_feats_per_pt + tile_idx * tile_feat_size
                 
@@ -740,8 +690,7 @@ def scatter_thread(
                     dest_bulk_addr = dest_tile_base + bulk_offset
                     
                     # Record write access
-                    ov_base = getattr(minuet_config, 'OV_BASE', minuet_config.GM_BASE + (1 << 30)) # Placeholder for OV_BASE
-                    record_local(thread_id, mapping_module.OPS['W'], ov_base + dest_bulk_addr * minuet_config.SIZE_FEAT)
+                    record_local(thread_id, mapping_module.OPS['W'], minuet_config.IV_BASE + dest_bulk_addr * minuet_config.SIZE_FEAT)
                     
                     # Actual data storing only if outputs is not None AND gemm_buffers was not None (i.e., tile_data has valid data)
                     if outputs is not None and gemm_buffers is not None: # gemm_buffers check implies tile_data is valid
@@ -749,8 +698,8 @@ def scatter_thread(
                         
                         dest_bulk_start = dest_bulk_addr
                         dest_bulk_end = dest_bulk_addr + bulk_feat_size
-                        
-                        outputs[dest_bulk_start:dest_bulk_end] += bulk_to_write
+                        for i, update in enumerate(bulk_to_write):
+                            outputs[dest_bulk_start + i] += update
     flush_local_trace()
 
 # Main function to orchestrate the threaded scatter execution
@@ -799,3 +748,182 @@ def mt_scatter(
 
     # 'outputs' array has been modified by the worker threads.
 
+
+
+
+
+# --- Example Usage (Illustrative) ---
+# if __name__ == '__main__':
+#    # ... (original content will be moved to test_gather_original) ...
+
+def test_gather_original():
+    """Wraps the original gather test from the if __name__ == '__main__' block."""
+    print(f"Starting Python threaded simulation for GATHER...")
+    if hasattr(minuet_config, 'mem_trace'):
+        minuet_config.mem_trace = [] # Clear trace for this test
+    else:
+        # This case should ideally be handled by the main block's default setup
+        print("Warning: minuet_config.mem_trace not found for clearing.")
+
+
+    # Define some example parameters and data
+    _num_pts = 8  
+    _num_tiles = 4 
+    _tile_feats = 16 
+    _bulk_feats = 4  
+    _n_threads = 2 
+    _n_offsets = 2 
+    _total_feats_pt = _num_tiles * _tile_feats 
+    
+    # Initialize dummy data
+    _src_data = [float(i) for i in range(_num_pts * _total_feats_pt)] 
+    
+    _src_masks_data = [-1]*(_num_pts * _n_offsets) 
+    _src_masks_data = [0, -1, -1, -1, -1, -1, -1,-1,
+                       4,  1,  2,  3,  -1, -1, -1, -1] # Example mask
+    
+    # Assuming 5 slots are enough for the active items in _src_masks_data
+    # Max slot index used is 4, so 5 slots (0-4) needed.
+    _num_active_slots_example = 5 
+    _src_bufs_data = [0.0] * (_num_active_slots_example * _total_feats_pt)
+
+    print(f"  Parameters: num_points={_num_pts}, num_offsets={_n_offsets}, num_tiles={_num_tiles}, tile_feats={_tile_feats}, bulk_feats={_bulk_feats}, n_threads={_n_threads}")
+    print(f"  Initial sum of gemm_buffers: {sum(_src_bufs_data)}")
+
+    mt_gather(
+        num_threads=_n_threads,
+        num_points=_num_pts,
+        num_offsets = _n_offsets,
+        num_tiles_per_pt=_num_tiles,
+        tile_feat_size=_tile_feats,
+        bulk_feat_size=_bulk_feats,
+        source_masks=_src_masks_data,
+        sources=_src_data,
+        gemm_buffers=_src_bufs_data
+    )
+
+    print("  Python threaded GATHER simulation finished.")
+    print(f"  Final sum of gemm_buffers: {sum(_src_bufs_data)}")
+    
+    if hasattr(minuet_config, 'mem_trace') and minuet_config.mem_trace:
+        print("  Gather test mem_trace (first 5 entries):")
+        for entry in islice(minuet_config.mem_trace, 5):
+            print(f"    {entry}")
+        if len(minuet_config.mem_trace) > 5:
+            print(f"    ... and {len(minuet_config.mem_trace) - 5} more entries.")
+    else:
+        print("  Gather test mem_trace: No trace recorded or trace is empty.")
+
+
+def test_scatter():
+    """Tests the mt_scatter function."""
+    print(f"Starting Python threaded simulation for SCATTER...")
+    if hasattr(minuet_config, 'mem_trace'):
+        minuet_config.mem_trace = [] # Clear trace for this test
+    else:
+        print("Warning: minuet_config.mem_trace not found for clearing.")
+
+    # Scatter test parameters
+    _num_pts_out = 2  # Number of output points
+    _num_tiles = 1
+    _tile_feats = 4
+    _bulk_feats = 2   # 2 bulks per tile
+    _n_threads = 1    # Simpler for verification
+    _n_offsets = 2    # Two offsets contributing to an output point
+
+    _total_feats_pt_out = _num_tiles * _tile_feats  # 1 * 4 = 4
+
+    # GEMM buffer setup
+    _num_slots_gemm = 2 # Only one unique slot of data from GEMM buffer for this test
+    _gemm_buffers_data = [float(i+10) for i in range(_total_feats_pt_out*_num_slots_gemm)] # [10.0, 11.0, 12.0, 13.0]
+    # _gemm_buffers_data = [float(i+10) for i in range(_total_feats_pt_out)] + [float(i+20) for i in range(_total_feats_pt_out)] # Effectively just _gemm_slot_data if _num_slots_gemm is 1
+
+    # Output mask (this is the `in_mask` from `create_in_out_masks` conceptually)
+    # Format: _out_mask_data[off_idx * _num_pts_out + pt_idx] = gemm_slot_idx
+    # Output Point 0 gets data from GEMM slot 0 via offset 0 AND offset 1
+    # Output Point 1 gets no data
+    _out_mask_data = [-1] * (_n_offsets * _num_pts_out) # Initialize with -1
+    # Offset 0:
+    _out_mask_data[0 * _num_pts_out + 0] = 0  # Off0, PtOut0 -> Slot0
+    # _out_mask_data[0 * _num_pts_out + 1] = -1 (already -1)
+    # Offset 1:
+    _out_mask_data[1 * _num_pts_out + 0] = 1  # Off1, PtOut0 -> Slot0
+    # _out_mask_data[1 * _num_pts_out + 1] = -1 (already -1)
+    # Resulting _out_mask_data = [0, -1, 0, -1]
+
+    # Outputs array (destination)
+    _outputs_data = [0.0] * (_num_pts_out * _total_feats_pt_out)
+    # Expected initial _outputs_data = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0]
+
+    print(f"  Parameters: num_output_points={_num_pts_out}, num_offsets={_n_offsets}, num_tiles={_num_tiles}, tile_feats={_tile_feats}, bulk_feats={_bulk_feats}, n_threads={_n_threads}")
+    print(f"  GEMM buffer (slot 0 data): {_gemm_buffers_data}")
+    print(f"  Out Mask (for scatter): {_out_mask_data}")
+    print(f"  Initial outputs: {_outputs_data}")
+
+    mt_scatter(
+        num_threads=_n_threads,
+        num_points=_num_pts_out,
+        num_offsets=_n_offsets,
+        num_tiles_per_pt=_num_tiles,
+        tile_feat_size=_tile_feats,
+        bulk_feat_size=_bulk_feats,
+        out_mask=_out_mask_data,
+        gemm_buffers=None,
+        outputs=_outputs_data
+    )
+
+    print(f"  Final outputs: {_outputs_data}")
+
+    # Verification
+    expected_outputs_data = [0.0] * len(_outputs_data)
+    # Point 0, Offset 0 contribution
+    if _out_mask_data[0 * _num_pts_out + 0] != -1:
+        for i in range(_total_feats_pt_out):
+            expected_outputs_data[0 * _total_feats_pt_out + i] += _gemm_buffers_data[0 * _total_feats_pt_out + i]
+    # Point 0, Offset 1 contribution
+    if _out_mask_data[1 * _num_pts_out + 0] != -1:
+        for i in range(_total_feats_pt_out):
+            expected_outputs_data[0 * _total_feats_pt_out + i] += _gemm_buffers_data[1 * _total_feats_pt_out + i]
+    # Point 1 receives no data as per mask, so its part in expected_outputs_data remains 0.0
+
+    print(f"  Expected outputs (element-wise sum): {expected_outputs_data}")
+
+    successful = True
+    if len(_outputs_data) == len(expected_outputs_data):
+        for i in range(len(_outputs_data)):
+            if abs(_outputs_data[i] - expected_outputs_data[i]) > 1e-9:
+                successful = False
+                break
+    else:
+        successful = False # Length mismatch itself is a failure
+
+    if successful:
+        print("  Scatter test: PASSED (based on element-wise sum expectation)")
+    else:
+        print("  Scatter test: FAILED")
+
+    if hasattr(minuet_config, 'mem_trace') and minuet_config.mem_trace:
+        print("  Scatter test mem_trace (first 5 entries):")
+        for entry in islice(minuet_config.mem_trace, 5):
+            print(f"    {entry}")
+        if len(minuet_config.mem_trace) > 5:
+            print(f"    ... and {len(minuet_config.mem_trace) - 5} more entries.")
+    else:
+        print("  Scatter test mem_trace: No trace recorded or trace is empty.")
+
+
+if __name__ == '__main__':
+    test_to_run = "scatter"  # Options: "gather", "scatter", "both", "none"
+
+    if test_to_run.lower() == "gather" or test_to_run.lower() == "both":
+        print("\\n" + "="*30 + " GATHER TEST START " + "="*30 + "\\n")
+        test_gather_original()
+        print("="*30 + " GATHER TEST END " + "="*30 + "\\n")
+
+    if test_to_run.lower() == "scatter" or test_to_run.lower() == "both":
+        print("\\n" + "="*30 + " SCATTER TEST START " + "="*30 + "\\n")
+        test_scatter()
+        print("="*30 + " SCATTER TEST END " + "="*30 + "\\n")
+
+    if test_to_run.lower() == "none":
+        print("No tests selected to run.")

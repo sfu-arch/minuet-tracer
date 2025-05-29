@@ -19,7 +19,8 @@ PHASES = bidict({
     'SRT': 2,
     'PVT': 3,
     'LKP': 4,
-    'GTH': 5
+    'GTH': 5,
+    'SCT': 6
 })
 TENSORS = bidict({
     'I': 0,

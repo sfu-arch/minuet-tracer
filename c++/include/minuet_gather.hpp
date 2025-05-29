@@ -4,6 +4,15 @@
 #include <vector>
 #include <string>
 #include <cstdint> // For uint32_t, uint64_t
+#include <map>     // For std::map
+#include <utility> // For std::pair
+#include "coord.hpp"        // For Coord3D
+#include "sorted_map.hpp"   // For SortedByValueSizeMap
+
+// Define KernelMapType consistently
+// This is the type for kernel_map, storing matches for each offset key,
+// sorted by the number of matches.
+using KernelMapType = SortedByValueSizeMap<uint32_t, std::vector<std::pair<int, int>>>;
 
 // --- Structs and Functions for Greedy Grouping ---
 struct GemmInfo {
@@ -56,6 +65,19 @@ struct MetadataContents {
     std::vector<int32_t> out_mask;
     std::vector<int32_t> in_mask;
 };
+
+// --- Mask Generation ---
+struct MasksResult {
+    std::vector<int32_t> out_mask;
+    std::vector<int32_t> in_mask;
+};
+
+MasksResult create_in_out_masks_cpp(
+    const KernelMapType& kernel_map,
+    const std::map<uint32_t, int>& slot_dict,
+    uint32_t num_total_system_offsets,
+    uint32_t num_total_system_sources
+);
 
 // --- Function Declarations ---
 MetadataContents read_metadata_cpp(const std::string& filename);

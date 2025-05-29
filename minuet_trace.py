@@ -15,7 +15,8 @@ if __name__ == '__main__':
     stride = 1
     off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     # off_coords = [(0,1,-1)]
-    
+    # for i in range(len(off_coords)):
+        # print(f"Offset {i}: {off_coords[i]}")
     ####################### Phase 1 Mapping #######################
     
     # Phase 1: Sort and deduplicate input coordinates
@@ -66,11 +67,6 @@ if __name__ == '__main__':
         for off_idx, matches in kmap.items():
             print(f"  Offset {off_coords[off_idx]}: {matches}")
     
-    # Write memory trace to file
-    print('\nMemory Trace Entries:')
-    for e in mem_trace[:-1]:  # Show all entries except the last one
-        print(e)
-    print(f"... and {len(mem_trace)-10} more entries")
     
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
@@ -112,33 +108,13 @@ if __name__ == '__main__':
     # Write metadata to file
     metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
 
-
-    # Ready for scatter simulation
+    ############## Phase 3: Gather/Scatter Simulation ##############
 
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")
     gemm_buffer = np.zeros(total_slots*TOTAL_FEATS_PT, dtype=np.uint16)
    
-    
-    
-            
-
-    # python_threaded_gather_simulation(
-    #     num_points=len(uniq_coords),
-    #     num_tiles_per_pt=NUM_TILES,
-    #     tile_feat_size=TILE_FEATS,
-    #     bulk_feat_size=BULK_FEATS,
-    #     num_threads=N_THREADS, # Updated parameter name
-    #     offsets=offsets_active,
-    #     offset_cumsum_pad=_offsets_cumsum, # Updated parameter name
-    #     source_masks=in_mask,
-    #     sources=
-    #     source_buffers=gemm_buffer,
-    # )
-
-
-
     
     if debug:
         print("Groups metadata ([start, end], base, req, alloc):")
@@ -147,34 +123,6 @@ if __name__ == '__main__':
         print("GEMM List:")
         for g in gemm_list:
             print(g)
-
-    if debug:
-        print(gemm_list)
-        # Print total space allocated by groups
-        total_alloc = sum(g[3] for g in groups)
-        print(f"\nTotal allocated space: {total_alloc} slots")
-
-        print("\nPer-position slot indices:")
-        print(slot_indices)
-
-        print("\nGroup membership lists:")
-        print(membership)
-
-
-    # Write all checksums to file as json
-    checksums = {
-        "map_trace.bin.gz": map_trace_checksum,
-        "metadata.bin.gz": metadata_checksum,
-        "gemms.bin.gz": gemm_checksum,
-    }
-    
-    import json    
-    with open(output_dir+'checksums.json', 'w') as f:
-        json.dump(checksums, f, indent=2)
-
-
-    from minuet_gather import compact_bar_chart
-    compact_bar_chart(groups)
 
 
     from minuet_gather import mt_gather
@@ -190,31 +138,36 @@ if __name__ == '__main__':
         gemm_buffers= gemm_buffer
     )
     
-        # Write memory trace to file
-    print('\nGather Memory Trace Entries:')
-    for e in mem_trace[:-1]:  # Show all entries except the last one
-        print(e)
-    print(f"... and {len(mem_trace)-10} more entries")
-    write_gmem_trace(output_dir+'gather_trace.bin.gz', sizeof_addr=8)
     
+    gather_checksum = write_gmem_trace(output_dir+'gather_trace.bin.gz', sizeof_addr=8)
+    
+    from minuet_gather import mt_gather
+    mt_scatter(
+        num_threads=2,  # Updated parameter name
+        num_points=len(uniq_coords),
+        num_offsets = len(off_coords),
+        num_tiles_per_pt=minuet_config.NUM_TILES_GATHER,
+        tile_feat_size=minuet_config.TILE_FEATS_GATHER,
+        bulk_feat_size=minuet_config.BULK_FEATS_GATHER,
+        out_mask=out_mask,
+        gemm_buffers=None,
+        outputs=None
+        )
+    
+    scatter_checksum = write_gmem_trace(output_dir+'scatter_trace.bin.gz', sizeof_addr=8)
+
+    # Write all checksums to file as json
+    checksums = {
+        "map_trace.bin.gz": map_trace_checksum,
+        "metadata.bin.gz": metadata_checksum,
+        "gemms.bin.gz": gemm_checksum,
+        "gather_trace.bin.gz": gather_checksum,
+        "scatter_trace.bin.gz": scatter_checksum,
+    }
+    
+    import json    
+    with open(output_dir+'checksums.json', 'w') as f:
+        json.dump(checksums, f, indent=2)
+
  
-    # print("\nSorted Kernel Map by Length of Matches:")
-    # for off_idx, matches in sorted_kmap:
-    #     if matches:
-    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
-    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
-    #     if matches:
-    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
-    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
-
-
-
-
-    # print("\nSorted Kernel Map by Length of Matches:")
-    # for off_idx, matches in sorted_kmap:
-    #     if matches:
-    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
-    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
-    #     if matches:
-    #         print(f"  Offset {off_coords[off_idx]}: {matches}")
-    # print(f"Total entries in sorted kernel map: {len(sorted_kmap)}")
+    

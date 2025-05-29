@@ -68,6 +68,7 @@ def analyze_trace(entries):
     # Count operations by phase
     phase_ops = defaultdict(lambda: {'R': 0, 'W': 0})
     for entry in entries:  
+        print(entry)
         # print(entry)
         # print(entry['phase'], entry['op'])
         phase_ops[entry['phase']][entry['op']] += 1

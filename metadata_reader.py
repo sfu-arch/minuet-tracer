@@ -83,6 +83,12 @@ def main():
         
     if in_mask is not None:
         print(f"    Input Mask Shape: {in_mask.shape}, Dtype: {in_mask.dtype}")
+        print(in_mask.ravel())
+
+    if out_mask is not None:
+        print(f"    Output Mask Shape: {out_mask.shape}, Dtype: {out_mask.dtype}")
+        print(out_mask.ravel())
+        
         # print(f"    Input Mask (first 10 elements): {in_mask.ravel()[:10]}")
     else:
         print("    Input Mask: Not found or empty.")

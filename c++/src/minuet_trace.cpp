@@ -65,11 +65,7 @@ bidict<std::string, int> TENSORS({
 
 bidict<std::string, int> OPS({{"R", 0}, {"W", 1}});
 
-std::string to_hex_string(uint64_t val) {
-    std::stringstream ss;
-    ss << "0x" << std::hex << val;
-    return ss.str();
-}
+
 
 
 // --- Memory Tracing Functions ---
