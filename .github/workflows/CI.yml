@@ -49,10 +49,10 @@ jobs:
       - name: Build C++ project
         run: |
           cd c++
-          # cmake -B <build_dir> creates the directory if it doesn't exist
-          # and configures the project.
-          # CMake should now be able to find pybind11.
-          cmake -B build 
+          # Get the CMake directory for pybind11 installed via pip
+          PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
+          # Pass this directory to CMake to help it find pybind11Config.cmake or pybind11-config.cmake
+          cmake -B build -Dpybind11_DIR=${PYBIND11_CMAKE_DIR} 
           cd build
           make
 
