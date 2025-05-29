@@ -19,7 +19,22 @@ jobs:
       - name: Set up C++ environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake zlib1g-dev
+          sudo apt-get install -y build-essential cmake zlib1g-dev python3-dev
+
+      - name: Cache Python dependencies
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip # Standard pip cache directory
+          # Key for the cache. If you add a requirements.txt, this will use its hash.
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Pybind11 for C++ build
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install pybind11 # Installs pybind11, making headers available
 
       - name: Cache C++ build artifacts
         id: cache-cpp-build
@@ -36,25 +51,16 @@ jobs:
           cd c++
           # cmake -B <build_dir> creates the directory if it doesn't exist
           # and configures the project.
+          # CMake should now be able to find pybind11.
           cmake -B build 
           cd build
           make
 
-      - name: Cache Python dependencies
-        id: cache-pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip # Standard pip cache directory
-          # Key for the cache. If you add a requirements.txt, this will use its hash.
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Set up Python environment and install dependencies
+      - name: Install other Python dependencies
         run: |
-          python3 -m pip install --upgrade pip
+          # pip and pybind11 are already installed/upgraded
           pip install open3d # Will use cached packages if available
-          pip install pybind11
+          
       - name: Run Python scripts
         run: |
           python3 minuet_trace.py --config ./config.json
