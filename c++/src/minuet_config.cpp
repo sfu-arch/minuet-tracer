@@ -12,6 +12,7 @@ MinuetConfig::MinuetConfig() :
     SIZE_KEY(4),
     SIZE_INT(4),
     SIZE_WEIGHT(4),
+    SIZE_FEAT(2),
     I_BASE(0x10000000),
     TILE_BASE(I_BASE), // Alias
     QK_BASE(0x20000000),
@@ -21,13 +22,14 @@ MinuetConfig::MinuetConfig() :
     KM_BASE(0x60000000),
     WO_BASE(0x80000000),
     IV_BASE(0x100000000),
+    GM_BASE(0x800000000), // GEMM buffers (64-bit)
     WV_BASE(0xF00000000),
     GEMM_ALIGNMENT(4),
     GEMM_WT_GROUP(2),
     GEMM_SIZE(4),
-    NUM_TILES(2),
-    TILE_FEATS(32), // Changed default value
-    BULK_FEATS(256), // Changed default value
+    NUM_TILES(4),
+    TILE_FEATS(16), // Changed default value
+    BULK_FEATS(4), // Changed default value
     N_THREADS_GATHER(8), // Changed default value
     TOTAL_FEATS_PT(256), // Changed default value
     debug(false), // Initialize debug flag

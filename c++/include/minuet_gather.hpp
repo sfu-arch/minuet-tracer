@@ -92,5 +92,30 @@ uint32_t write_metadata_cpp(
     const std::string& filename
 );
 
+// --- Gather and Scatter Operations ---
+void mt_gather_cpp(
+    uint32_t num_threads,
+    uint32_t num_points,
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& source_masks, // Assuming int32_t for masks
+    const std::vector<float>& sources,       // Assuming float for feature data
+    std::vector<float>& gemm_buffers         // Assuming float for feature data
+);
+
+void mt_scatter_cpp(
+    uint32_t num_threads,
+    uint32_t num_points,          // Number of *output* points
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& out_mask,    // Assuming int32_t for masks
+    const std::vector<float>& gemm_buffers,  // Assuming float for feature data
+    std::vector<float>& outputs              // Assuming float for feature data
+);
+
 
 #endif // MINUET_GATHER_HPP

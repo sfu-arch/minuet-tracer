@@ -1,5 +1,6 @@
 // minuet_gather.cpp
 #include "minuet_gather.hpp"
+#include "minuet_trace.hpp"
 #include "minuet_config.hpp" // For g_config
 #include <algorithm>         // For std::min if used (not directly used here)
 #include <iomanip>           // Required for std::hex
@@ -129,6 +130,223 @@ GreedyGroupResult greedy_group_cpp(const std::vector<int> &slots, int alignment,
 
   result.checksum = write_gemm_list_cpp(result.gemm_list, gemm_filename);
   return result;
+}
+
+// --- Gather and Scatter Thread Worker Functions ---
+
+// Thread-local storage for memory traces
+static thread_local std::vector<MemoryAccessEntry> local_mem_trace;
+
+// Mutex for protecting access to the global memory trace
+static std::mutex global_mem_trace_access_mutex;
+
+
+// Helper function to record memory access locally
+void record_local_access_cpp(uint8_t thread_id, const std::string& op_str, uint64_t addr) {
+    uint8_t phase_id = PHASES.forward.at(get_curr_phase()); // Assumes get_curr_phase is accessible
+    uint8_t op_id = OPS.forward.at(op_str); // Assumes OPS is accessible
+    uint8_t tensor_id = addr_to_tensor(addr); // Assumes addr_to_tensor is accessible
+    
+    local_mem_trace.push_back({phase_id, thread_id, op_id, tensor_id, addr});
+}
+
+// Helper function to flush local trace to global trace
+void flush_local_trace_cpp() {
+    if (!local_mem_trace.empty()) {
+        std::lock_guard<std::mutex> lock(global_mem_trace_access_mutex); // Corrected mutex name
+        // Assumes mem_trace is the global trace vector, accessible here
+        // and that MemoryAccessEntry is the correct type.
+        // This might require including "minuet_trace.hpp" for MemoryAccessEntry and mem_trace declaration
+        // For now, assuming mem_trace is a global std::vector<MemoryAccessEntry>
+        // If mem_trace is not directly accessible, a function like append_to_global_trace might be needed.
+         extern std::vector<MemoryAccessEntry> mem_trace; // Make sure this is declared (e.g. in minuet_trace.hpp)
+         mem_trace.insert(mem_trace.end(), local_mem_trace.begin(), local_mem_trace.end());
+        local_mem_trace.clear();
+    }
+}
+
+
+void gather_thread_worker_cpp(
+    uint32_t thread_id,
+    uint32_t num_threads,
+    uint32_t num_points,
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& source_masks,
+    const std::vector<float>& sources,
+    std::vector<float>& gemm_buffers) {
+
+    if (tile_feat_size % bulk_feat_size != 0) {
+        throw std::invalid_argument("tile_feat_size must be divisible by bulk_feat_size");
+    }
+    uint32_t num_bulks = tile_feat_size / bulk_feat_size;
+    uint64_t total_feats_per_pt = static_cast<uint64_t>(num_tiles_per_pt) * tile_feat_size;
+
+    for (uint32_t pt_idx = thread_id; pt_idx < num_points; pt_idx += num_threads) {
+        uint64_t pt_base = static_cast<uint64_t>(pt_idx) * total_feats_per_pt;
+        for (uint32_t tile_idx = 0; tile_idx < num_tiles_per_pt; ++tile_idx) {
+            uint64_t tile_start_in_source = pt_base + static_cast<uint64_t>(tile_idx) * tile_feat_size;
+
+            for (uint32_t b = 0; b < num_bulks; ++b) {
+                uint64_t bulk_start_in_source = tile_start_in_source + b * bulk_feat_size;
+                // Record read from IV_BASE
+                record_local_access_cpp(static_cast<uint8_t>(thread_id), OPS.inverse.at(0), g_config.IV_BASE + bulk_start_in_source * g_config.SIZE_FEAT);
+            }
+
+            for (uint32_t off_idx = 0; off_idx < num_offsets; ++off_idx) {
+                uint32_t mask_idx = off_idx * num_points + pt_idx;
+                int32_t dest_slot = source_masks[mask_idx];
+                if (dest_slot < 0) {
+                    continue;
+                }
+
+                uint64_t dest_tile_base_in_gemm = static_cast<uint64_t>(dest_slot) * total_feats_per_pt + static_cast<uint64_t>(tile_idx) * tile_feat_size;
+                for (uint32_t b = 0; b < num_bulks; ++b) {
+                    uint64_t bulk_start_in_source = tile_start_in_source + static_cast<uint64_t>(b) * bulk_feat_size;
+                    uint64_t dest_bulk_start_in_gemm = dest_tile_base_in_gemm + static_cast<uint64_t>(b) * bulk_feat_size;
+
+                    if (!sources.empty()) { // Check if sources has data
+                        for(uint32_t i = 0; i < bulk_feat_size; ++i) {
+                            if ((bulk_start_in_source + i < sources.size()) && (dest_bulk_start_in_gemm + i < gemm_buffers.size())) {
+                                gemm_buffers[dest_bulk_start_in_gemm + i] = sources[bulk_start_in_source + i];
+                            }
+                        }
+                    }
+                    // Record write to GM_BASE
+                    record_local_access_cpp(static_cast<uint8_t>(thread_id), OPS.inverse.at(1), g_config.GM_BASE + dest_bulk_start_in_gemm * g_config.SIZE_FEAT);
+                }
+            }
+        }
+    }
+    flush_local_trace_cpp();
+}
+
+void scatter_thread_worker_cpp(
+    uint32_t thread_id,
+    uint32_t num_threads,
+    uint32_t num_points, // Number of *output* points
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& out_mask,
+    const std::vector<float>& gemm_buffers,
+    std::vector<float>& outputs) {
+
+    if (tile_feat_size % bulk_feat_size != 0) {
+        throw std::invalid_argument("tile_feat_size must be divisible by bulk_feat_size");
+    }
+    int num_bulks = tile_feat_size / bulk_feat_size;
+    uint64_t total_feats_per_pt = static_cast<uint64_t>(num_tiles_per_pt) * tile_feat_size;
+    std::vector<float> tile_data_temp(tile_feat_size); // Temporary buffer for one tile
+
+    for (uint32_t pt_idx = thread_id; pt_idx < num_points; pt_idx += num_threads) { // pt_idx is output point index
+        uint64_t dest_pt_base = static_cast<uint64_t>(pt_idx) * total_feats_per_pt;
+
+        for (int off_idx = 0; off_idx < num_offsets; ++off_idx) {
+            int mask_idx = off_idx * num_points + pt_idx;
+            int32_t source_slot = out_mask[mask_idx];
+            if (source_slot == -1) {
+                continue;
+            }
+
+            for (int tile_idx = 0; tile_idx < num_tiles_per_pt; ++tile_idx) {
+                uint64_t source_tile_base = static_cast<uint64_t>(source_slot) * total_feats_per_pt + static_cast<uint64_t>(tile_idx) * tile_feat_size;
+                
+                // Phase 1: Read entire source tile from gemm_buffers into tile_data_temp
+                for (int b = 0; b < num_bulks; ++b) {
+                    uint64_t bulk_offset_in_tile = static_cast<uint64_t>(b) * bulk_feat_size;
+                    uint64_t source_bulk_addr_in_gemm = source_tile_base + bulk_offset_in_tile;
+                    record_local_access_cpp(static_cast<uint8_t>(thread_id), OPS.inverse.at(0), g_config.GM_BASE + source_bulk_addr_in_gemm * g_config.SIZE_FEAT);
+                    if (!gemm_buffers.empty()) {
+                         for(int i = 0; i < bulk_feat_size; ++i) {
+                            if ((source_bulk_addr_in_gemm + i < gemm_buffers.size()) && (bulk_offset_in_tile + i < tile_data_temp.size())) {
+                                tile_data_temp[bulk_offset_in_tile + i] = gemm_buffers[source_bulk_addr_in_gemm + i];
+                            }
+                        }
+                    }
+                }
+
+                // Phase 2: Write from tile_data_temp to outputs array
+                uint64_t dest_tile_base_in_output = dest_pt_base + static_cast<uint64_t>(tile_idx) * tile_feat_size;
+                for (int b = 0; b < num_bulks; ++b) {
+                    uint64_t bulk_offset_in_tile = static_cast<uint64_t>(b) * bulk_feat_size;
+                    uint64_t dest_bulk_addr_in_output = dest_tile_base_in_output + bulk_offset_in_tile;
+                    record_local_access_cpp(static_cast<uint8_t>(thread_id), OPS.inverse.at(1), g_config.IV_BASE + dest_bulk_addr_in_output * g_config.SIZE_FEAT);
+                     if (!outputs.empty() && !gemm_buffers.empty()) { // Check if outputs and gemm_buffers (implies tile_data_temp is valid) have data
+                        for(int i = 0; i < bulk_feat_size; ++i) {
+                             if ((dest_bulk_addr_in_output + i < outputs.size()) && (bulk_offset_in_tile + i < tile_data_temp.size())) {
+                                outputs[dest_bulk_addr_in_output + i] += tile_data_temp[bulk_offset_in_tile + i]; // Accumulate
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    flush_local_trace_cpp();
+}
+
+
+// --- Main Gather and Scatter Functions ---
+void mt_gather_cpp(
+    uint32_t num_threads,
+    uint32_t num_points,
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& source_masks,
+    const std::vector<float>& sources,
+    std::vector<float>& gemm_buffers) {
+
+    set_curr_phase(PHASES.inverse.at(5)); // Assuming GTH is 5, needs to be added to PHASES map if not present
+                                          // Or use a new phase string e.g. "GTH_CPP" and add to PHASES
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(
+            gather_thread_worker_cpp,
+            i, num_threads, num_points, num_offsets, num_tiles_per_pt,
+            tile_feat_size, bulk_feat_size, std::ref(source_masks),
+            std::ref(sources), std::ref(gemm_buffers));
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    set_curr_phase(""); // Clear phase
+}
+
+void mt_scatter_cpp(
+    uint32_t num_threads,
+    uint32_t num_points, // Number of *output* points
+    uint32_t num_offsets,
+    uint32_t num_tiles_per_pt,
+    uint32_t tile_feat_size,
+    uint32_t bulk_feat_size,
+    const std::vector<int32_t>& out_mask,
+    const std::vector<float>& gemm_buffers,
+    std::vector<float>& outputs) {
+
+    set_curr_phase(PHASES.inverse.at(6)); // Assuming SCT is 6, needs to be added to PHASES map
+                                          // Or use a new phase string e.g. "SCT_CPP" and add to PHASES
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(
+            scatter_thread_worker_cpp,
+            i, num_threads, num_points, num_offsets, num_tiles_per_pt,
+            tile_feat_size, bulk_feat_size, std::ref(out_mask),
+            std::ref(gemm_buffers), std::ref(outputs));
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+    set_curr_phase(""); // Clear phase
 }
 
 MetadataContents read_metadata_cpp(const std::string &filename) {

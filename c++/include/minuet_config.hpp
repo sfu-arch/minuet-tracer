@@ -10,10 +10,11 @@
 
 struct MinuetConfig {
     // Number of virtual threads
-    int NUM_THREADS;
-    int SIZE_KEY;
-    int SIZE_INT;
-    int SIZE_WEIGHT;
+    uint32_t NUM_THREADS;
+    uint32_t SIZE_KEY;
+    uint32_t SIZE_INT;
+    uint32_t SIZE_WEIGHT;
+    uint32_t SIZE_FEAT;
 
     // Tensor Regions
     uint64_t I_BASE;
@@ -25,23 +26,24 @@ struct MinuetConfig {
     uint64_t KM_BASE;
     uint64_t WO_BASE;
     uint64_t IV_BASE; // Feature vectors (64-bit)
+    uint64_t GM_BASE; // GEMM buffers (64-bit)
     uint64_t WV_BASE; // Weight values (64-bit)
 
     // GEMM Parameters
-    int GEMM_ALIGNMENT;
-    int GEMM_WT_GROUP;
-    int GEMM_SIZE;
+    uint32_t GEMM_ALIGNMENT;
+    uint32_t GEMM_WT_GROUP;
+    uint32_t GEMM_SIZE;
 
     // GATHER PARAMETERS
-    int NUM_TILES;
-    int TILE_FEATS;
-    int BULK_FEATS;
-    int N_THREADS_GATHER;
-    int TOTAL_FEATS_PT; // Calculated: NUM_TILES * TILE_FEATS
+    uint32_t NUM_TILES;
+    uint32_t TILE_FEATS;
+    uint32_t BULK_FEATS;
+    uint32_t N_THREADS_GATHER;
+    uint32_t TOTAL_FEATS_PT; // Calculated: NUM_TILES * TILE_FEATS
 
     bool debug; // Added for debug flag
     std::string output_dir; // Added for output directory
-    int NUM_PIVOTS; // Added NUM_PIVOTS
+    uint32_t NUM_PIVOTS; // Added NUM_PIVOTS
 
     MinuetConfig(); // Constructor for default values
 

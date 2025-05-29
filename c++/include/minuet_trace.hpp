@@ -100,10 +100,10 @@ std::string to_hex_string(uint64_t val); // Forward declaration
 
 // --- Structs for function results (matching Python for clarity) ---
 struct MemoryAccessEntry { // Renamed from mem_trace_entry_t
-    std::string phase;
-    int thread_id;
-    std::string op;
-    std::string tensor;
+    uint8_t phase;
+    uint8_t thread_id;
+    uint8_t op;
+    uint8_t tensor;
     uint64_t addr;
 
     // For pybind11, if you want to print it easily from Python or use __repr__
@@ -163,7 +163,7 @@ bool get_debug_flag();
 // std::tuple<int, int, int> unpack32s(uint32_t key); // For signed unpacking
 
 // Memory tracing
-std::string addr_to_tensor(uint64_t addr);
+uint8_t addr_to_tensor(uint64_t addr);
 void record_access(int thread_id, const std::string& op, uint64_t addr); // op is "R" or "W"
 uint32_t write_gmem_trace(const std::string& filename); // Return checksum
 
