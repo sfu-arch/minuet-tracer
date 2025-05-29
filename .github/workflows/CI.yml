@@ -54,7 +54,7 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install open3d # Will use cached packages if available
-
+          pip install pybind11
       - name: Run Python scripts
         run: |
           python3 minuet_trace.py --config ./config.json
