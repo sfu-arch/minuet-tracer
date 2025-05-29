@@ -20,6 +20,6 @@
   "BULK_FEATS_GATHER": 4,
   "N_THREADS_GATHER": 1,
   "debug": true,
-  "output_dir": "./trace_out_python/",
+  "output_dir": "./out/",
   "NUM_PIVOTS": 2
 }

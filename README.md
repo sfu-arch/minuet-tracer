@@ -1,5 +1,6 @@
 # Requirements
 c++17 compatible compiler for running c++ version
+
 ```
 pip3 install open3d
 ```
@@ -15,12 +16,92 @@ There are three main scripts in this repository:
 
 
 ```bash
-# Python version
-python3 minuet_trace.py 
-# c++ version. 
+# Python version. Feature complete.
+python3 minuet_trace.py --config config.json
+# c++ version. Scatter pending
 cd c++; cmake -B build; cd build; make
-./minuet_mapping
+./minuet_trace_cpp --config ../config.json
 ```
+
+### Output files produced:**
+```bash
+ls out/
+checksums.json       kernel_map.bin       metadata.bin.gz
+gather_trace.bin.gz  kernel_map.bin.gz    scatter_trace.bin.gz
+gemms.bin.gz         map_trace.bin.gz
+
+# To read map trace file
+python3 map_trace_reader.py --trace-file out/map_trace.bin.gz --size
+
+# To read gemm list
+
+$ python3 gemms_trace_reader.py --trace-file ./out/gemms.bin.gz
+Successfully loaded configuration from /Users/ashriram/Desktop/minuet/config.json
+{'num_offsets': 1, 'gemm_M': 4, 'gemm_N': 1, 'padding': 0}
+{'num_offsets': 2, 'gemm_M': 4, 'gemm_N': 2, 'padding': 2}
+{'num_offsets': 2, 'gemm_M': 4, 'gemm_N': 2, 'padding': 2}
+
+# Gather reader
+python3 map_trace_reader.py --trace-file out/gather_trace.bin.gz --sizeof-addr 8
+
+# Scatter reader
+python3 map_trace_reader.py --trace-file out/scatter_trace.bin.gz --sizeof-addr 8
+
+```
+- `map_trace.bin.gz`: Memory access trace for the mapping phase.
+- `kernel_map.bin.gz`: Kernel map data (`not a trace`)
+- `gather_trace.bin.gz`: Gather phase.
+- `scatter_trace.bin.gz`: Scatter phase.
+- `gemms.bin.gz`: GEMM operations trace.
+- `metadata.bin.gz`: A compressed binary file containing metadata about the simulation, such as the number of threads, sizes of various data structures, and base addresses for tensors.
+
+Main timing simulation loop goes in phases
+MAP->GATHER->GEMM (one line at a time)->SCATTER
+
+
+### Config file**
+
+```json
+{
+  "NUM_THREADS": 8,
+  "SIZE_KEY": 4,
+  "SIZE_INT": 4,
+  "SIZE_WEIGHT": 4,
+  "I_BASE": "0x10000000",
+  "QK_BASE": "0x20000000",
+  "QI_BASE": "0x30000000",
+  "QO_BASE": "0x40000000",
+  "PIV_BASE": "0x50000000",
+  "KM_BASE": "0x60000000",
+  "WO_BASE": "0x80000000",
+  "IV_BASE": "0x100000000",
+  "WV_BASE": "0xF00000000",
+  "GEMM_ALIGNMENT": 4,
+  "GEMM_WT_GROUP": 2,
+  "GEMM_SIZE": 4,
+  "NUM_TILES_GATHER": 4,
+  "TILE_FEATS_GATHER": 16,
+  "BULK_FEATS_GATHER": 4,
+  "N_THREADS_GATHER": 1,
+  "debug": true,
+  "output_dir": "./trace_out_python/",
+  "NUM_PIVOTS": 2
+}
+```
+
+Description of the parameters:
+- `NUM_THREADS`: Number of virtual threads to simulate for the mapping phase.
+- `SIZE_KEY`: Size of a key in bytes (e.g., for coordinates).
+- `SIZE_INT`: Size of an integer in bytes.
+- `SIZE_WEIGHT`: Size of a weight value in bytes.
+- `I_BASE`, `QK_BASE`, `QI_BASE`, `QO_BASE`, `PIV_BASE`, `KM_BASE`, `WO_BASE`, `IV_BASE`, `WV_BASE`: Base addresses for different data structures (tensors) used in the simulation, defined in hexadecimal format.
+I: Input, QK: Query Keys, PIV: Pivot Keys, KM: Kernel Map, IV: Input Feature Vectors, GEMM_BASE: Buffers for GEMM 
+- `GEMM_ALIGNMENT`: Target matrix size for GEMM; number of inputs fused, `GEMM_WT_GROUP`: Max number of weights per group (break out condition for groups)
+
+
+
+
+
 
 This project simulates the memory access patterns of a Minuet-like kernel map algorithm. It includes both a c++ version and a python version. The simulation employs a fixed pool of virtual threads to model parallel processing. The primary output is a compressed binary file (`map_trace.bin.gz` python version or `map_trace_cpp.bin.gz` c++ version) containing the recorded memory accesses, which can be used for analyzing memory behavior, locality, and potential bottlenecks.
 
@@ -44,7 +125,6 @@ The input to the simulation is a set of 3D coordinates representing points in sp
 `IF WE ARE FETCHING ACTUAL FEATURE VECTORS, THE ADDRESS SPACE WILL NEED TO BE 64 BIT.`
 
 ### Input format
-
 
 - coords: A Python list of tuples, where each tuple (x, y, z) represents the integer coordinates of a point.
 Example: coords = [(1,5,0),(0,1,1),(0,0,2),(0,0,3)]
@@ -99,7 +179,7 @@ Simulates the following key phases:
 
 
 
-## Building the c++ Project
+# Building the c++ Project
 
 ### Prerequisites
 
@@ -135,7 +215,7 @@ After a successful build, an executable named `minuet_trace_cpp`
 To run the simulation:
 
 ```bash
-./minuet_trace_cpp
+./minuet_trace_cpp --config ../config.json
 ```
 
 The program will:
