@@ -51,6 +51,12 @@ public:
     // For std::vector, this is fine.
     using container_size_type = decltype(std::declval<ValueContainer>().size());
 
+    void _invalidate_cache() const {
+        cache_valid_ = false;
+        // Clearing the cache vector might be too aggressive if it causes frequent reallocations.
+        // For now, just marking as invalid is enough, _build_cache will clear and refill.
+        // sorted_keys_cache_.clear(); 
+    }
 private:
     std::map<Key, ValueContainer> data_;
     bool ascending_; // True for ascending size, false for descending
@@ -58,12 +64,7 @@ private:
     mutable std::vector<Key> sorted_keys_cache_;
     mutable bool cache_valid_ = false;
 
-    void _invalidate_cache() const {
-        cache_valid_ = false;
-        // Clearing the cache vector might be too aggressive if it causes frequent reallocations.
-        // For now, just marking as invalid is enough, _build_cache will clear and refill.
-        // sorted_keys_cache_.clear(); 
-    }
+
 
     void _build_cache() const {
         if (cache_valid_) return;

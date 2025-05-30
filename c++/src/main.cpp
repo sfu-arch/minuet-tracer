@@ -113,6 +113,7 @@ int main(int argc, char *argv[]) {
     // Create some metadata for gemm grouping. 
     std::vector<uint32_t> offsets_active;
     std::vector<int> slot_array; 
+    kmap._invalidate_cache(); // Invalidate cache to ensure we get fresh sorted items
     auto sorted_kmap_items_for_active = kmap.get_sorted_items(); 
     for (const auto& item : sorted_kmap_items_for_active) {
         if (!item.second.empty()) {
