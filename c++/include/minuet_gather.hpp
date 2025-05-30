@@ -8,6 +8,7 @@
 #include <utility> // For std::pair
 #include "coord.hpp"        // For Coord3D
 #include "sorted_map.hpp"   // For SortedByValueSizeMap
+#include "trace.hpp"
 
 // Define KernelMapType consistently
 // This is the type for kernel_map, storing matches for each offset key,

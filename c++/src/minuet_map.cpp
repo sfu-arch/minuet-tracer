@@ -1,4 +1,4 @@
-#include "minuet_trace.hpp"
+#include "minuet_map.hpp"
 #include <algorithm>
 #include <cmath> // For std::ceil in progress reporting
 #include <fstream>

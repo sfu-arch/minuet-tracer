@@ -18,76 +18,7 @@
 #include "minuet_config.hpp" // Include the new config header
 #include "coord.hpp"         // Include the new coord header
 #include "sorted_map.hpp"    // Include the new sorted_map header
-
-// --- Forward declaration for tuple printing ---
-// This might be redundant if coord.hpp or another utility handles it.
-// For now, keep if it's used by other parts of minuet_trace.hpp/cpp.
-// template<typename... Args>
-// std::ostream& operator<<(std::ostream& os, const std::tuple<Args...>& t);
-
-// --- Bidirectional map helper ---
-template <typename K, typename V>
-class bidict {
-public:
-    std::map<K, V> forward;
-    std::map<V, K> inverse;
-
-    bidict(const std::initializer_list<std::pair<const K, V>>& init_list) {
-        for (const auto& pair : init_list) {
-            forward[pair.first] = pair.second;
-            inverse[pair.second] = pair.first;
-        }
-    }
-
-    const V& at_key(const K& key) const {
-        return forward.at(key);
-    }
-
-    const K& at_val(const V& val) const {
-        return inverse.at(val);
-    }
-
-    V& operator[](const K& key) {
-        // This will insert if key doesn't exist, then we need to update inverse.
-        // For simplicity, assume keys are pre-populated or use .at_key for lookup.
-        // Proper handling of [] for insertion would require more logic.
-        return forward[key];
-    }
-};
-
-
-// --- Global Constants (from minuet_config.py and minuet_mapping.py) ---
-// These are now part of the g_config object and loaded from JSON
-// const int NUM_THREADS = 4;
-// const int SIZE_KEY    = 4;
-// const int SIZE_INT    = 4;
-// const int SIZE_WEIGHT = 4;
-
-// // Tensor Regions
-// const uint64_t I_BASE    = 0x10000000;
-// const uint64_t TILE_BASE = I_BASE; // Alias
-// const uint64_t QK_BASE   = 0x20000000;
-// const uint64_t QI_BASE   = 0x30000000;
-// const uint64_t QO_BASE   = 0x40000000;
-// const uint64_t PIV_BASE  = 0x50000000;
-// const uint64_t KM_BASE   = 0x60000000;
-// const uint64_t WO_BASE   = 0x80000000;
-// const uint64_t IV_BASE   = 0x100000000; // Feature vectors (64-bit)
-// const uint64_t WV_BASE   = 0xF00000000; // Weight values (64-bit)
-
-
-// // GEMM Parameters (used in gather, but defined in config)
-// const int GEMM_ALIGNMENT = 4;
-// const int GEMM_WT_GROUP = 2;
-// const int GEMM_SIZE = 4;
-
-// // GATHER PARAMETERS (used in gather, but defined in config)
-// const int NUM_TILES = 2;
-// const int TILE_FEATS = 16;
-// const int BULK_FEATS = 4;
-// const int N_THREADS_GATHER = 1; // Renamed from N_THREADS to avoid conflict
-// const int TOTAL_FEATS_PT = NUM_TILES * TILE_FEATS;
-
+#include "trace.hpp"
 
 // PHASES, TENSORS, OPS (from minuet_mapping.py)
 // These will be extern bidict<std::string, int> defined in minuet_trace.cpp
@@ -95,25 +26,6 @@ extern bidict<std::string, int> PHASES;
 extern bidict<std::string, int> TENSORS;
 extern bidict<std::string, int> OPS;
 
-// Helper function to convert value to hex string
-std::string to_hex_string(uint64_t val); // Forward declaration
-
-// --- Structs for function results (matching Python for clarity) ---
-struct MemoryAccessEntry { // Renamed from mem_trace_entry_t
-    uint8_t phase;
-    uint8_t thread_id;
-    uint8_t op;
-    uint8_t tensor;
-    uint64_t addr;
-
-    // For pybind11, if you want to print it easily from Python or use __repr__
-    std::string toString() const {
-        std::ostringstream oss;
-        oss << "MemoryAccessEntry(phase=" << phase << ", thread_id=" << thread_id
-            << ", op=" << op << ", tensor=" << tensor << ", addr=" << to_hex_string(addr) << ")";
-        return oss.str();
-    }
-};
 
 struct BuildQueriesResult {
     std::vector<IndexedCoord> qry_keys; // Vector of IndexedCoord (coord, original_source_idx)

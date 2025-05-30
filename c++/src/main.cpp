@@ -1,5 +1,6 @@
 #include "minuet_config.hpp"
-#include "minuet_trace.hpp"
+#include "minuet_map.hpp"
+#include "trace.hpp"
 #include "minuet_gather.hpp" // Added for GreedyGroupResult and greedy_group
 #include <iostream>
 #include <vector>

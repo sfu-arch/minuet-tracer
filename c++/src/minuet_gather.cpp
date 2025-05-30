@@ -1,6 +1,6 @@
 // minuet_gather.cpp
 #include "minuet_gather.hpp"
-#include "minuet_trace.hpp"
+#include "minuet_map.hpp"
 #include "minuet_config.hpp" // For g_config
 #include <algorithm>         // For std::min if used (not directly used here)
 #include <iomanip>           // Required for std::hex

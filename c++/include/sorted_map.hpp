@@ -10,6 +10,36 @@
 // Forward declaration for a potential custom iterator if we go that route in the future
 // template<typename Key, typename ValueContainer> class SortedMapIterator;
 
+// --- Bidirectional map helper ---
+template <typename K, typename V>
+class bidict {
+public:
+    std::map<K, V> forward;
+    std::map<V, K> inverse;
+
+    bidict(const std::initializer_list<std::pair<const K, V>>& init_list) {
+        for (const auto& pair : init_list) {
+            forward[pair.first] = pair.second;
+            inverse[pair.second] = pair.first;
+        }
+    }
+
+    const V& at_key(const K& key) const {
+        return forward.at(key);
+    }
+
+    const K& at_val(const V& val) const {
+        return inverse.at(val);
+    }
+
+    V& operator[](const K& key) {
+        // This will insert if key doesn't exist, then we need to update inverse.
+        // For simplicity, assume keys are pre-populated or use .at_key for lookup.
+        // Proper handling of [] for insertion would require more logic.
+        return forward[key];
+    }
+};
+
 template<typename Key, typename ValueContainer>
 class SortedByValueSizeMap {
 public:

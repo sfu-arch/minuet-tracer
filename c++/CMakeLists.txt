@@ -14,7 +14,7 @@ find_package(pybind11 CONFIG REQUIRED)
 # Add the pybind11 module
 # The first argument is the name of the module
 pybind11_add_module(minuet_cpp_module
-    src/minuet_trace.cpp
+    src/minuet_map.cpp
     src/minuet_bindings.cpp # Add the new bindings file
     src/minuet_config.cpp   # Add the config source file
     src/coord.cpp # Add the coord source file
@@ -43,7 +43,7 @@ endif()
 # Remove the old executable target if it exists, or comment it out
 add_executable(minuet_trace_cpp
     src/main.cpp
-    src/minuet_trace.cpp
+    src/minuet_map.cpp
     src/minuet_config.cpp
     src/coord.cpp
     src/minuet_gather.cpp   
@@ -53,6 +53,20 @@ target_include_directories(minuet_trace_cpp PUBLIC
     ${ZLIB_INCLUDE_DIRS}
 )
 target_link_libraries(minuet_trace_cpp PUBLIC
+    ${ZLIB_LIBRARIES}
+    Threads::Threads
+)
+
+# Remove the old executable target if it exists, or comment it out
+add_executable(mem_trace_reader
+    src/mem_trace_reader.cpp
+)
+target_include_directories(mem_trace_reader PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    ${ZLIB_INCLUDE_DIRS}
+)
+# Trace reader is standalone, so it should not need any includes.
+target_link_libraries(mem_trace_reader PUBLIC
     ${ZLIB_LIBRARIES}
     Threads::Threads
 )

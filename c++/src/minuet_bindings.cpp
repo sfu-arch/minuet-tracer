@@ -1,7 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/operators.h> // For operator overloading
-#include "minuet_trace.hpp"     // Your main header
+#include "minuet_map.hpp"     // Your main header
 #include "minuet_config.hpp"    // Include the config header for g_config
 #include "minuet_gather.hpp"    // Include the gather header
 
