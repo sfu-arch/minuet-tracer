@@ -197,6 +197,7 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
     // m.def("addr_to_tensor", &addr_to_tensor, py::arg("addr")); // Internal, not typically bound
     m.def("record_access", &record_access, py::arg("thread_id"), py::arg("op"), py::arg("addr"));
     m.def("write_gmem_trace", &write_gmem_trace, py::arg("filename"),
+          py::arg("sizeof_addr") = 4, // Add sizeof_addr argument with default
           "Writes the memory trace to a gzipped file and returns its CRC32 checksum.");
     
     m.def("compute_unique_sorted_coords", &compute_unique_sorted_coords, 
@@ -327,6 +328,44 @@ PYBIND11_MODULE(minuet_cpp_module, m) {
           py::arg("filename"),
           "Writes metadata to a gzipped binary file and returns its CRC32 checksum.");
 
-    // // Bind Minuet Gather Structs
+    // Bind Gather/Scatter functions
+    m.def("mt_gather_cpp", &mt_gather_cpp,
+          py::arg("num_threads"),
+          py::arg("num_points"),
+          py::arg("num_offsets"),
+          py::arg("num_tiles_per_pt"),
+          py::arg("tile_feat_size"),
+          py::arg("bulk_feat_size"),
+          py::arg("source_masks"),
+          py::arg("sources"),
+          py::arg("gemm_buffers"),
+          "Performs the gather operation using C++ implementation.");
+
+    m.def("mt_scatter_cpp", &mt_scatter_cpp,
+          py::arg("num_threads"),
+          py::arg("num_points"),
+          py::arg("num_offsets"),
+          py::arg("num_tiles_per_pt"),
+          py::arg("tile_feat_size"),
+          py::arg("bulk_feat_size"),
+          py::arg("out_mask"),
+          py::arg("gemm_buffers"),
+          py::arg("outputs"),
+          "Performs the scatter operation using C++ implementation.");
+
+    // Bind MasksResult struct
+    py::class_<MasksResult>(m, "MasksResult")
+        .def(py::init<>())
+        .def_readwrite("out_mask", &MasksResult::out_mask)
+        .def_readwrite("in_mask", &MasksResult::in_mask);
+
+    // Bind create_in_out_masks_cpp
+    m.def("create_in_out_masks_cpp", &create_in_out_masks_cpp,
+          py::arg("kernel_map"),
+          py::arg("slot_dict"), // std::map<uint32_t, int>
+          py::arg("num_total_system_offsets"),
+          py::arg("num_total_system_sources"),
+          "Creates input and output masks for gather/scatter operations.");
+
 
 }

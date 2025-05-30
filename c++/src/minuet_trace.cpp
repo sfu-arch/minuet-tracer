@@ -115,10 +115,15 @@ std::string addr_to_tensor_str(uint64_t addr) {
 }
 
 
-uint32_t write_gmem_trace(const std::string &filename) {
+uint32_t write_gmem_trace(const std::string &filename, int sizeof_addr /* = 4 */) { // Added sizeof_addr parameter
   gzFile outFile = gzopen(filename.c_str(), "wb");
   if (!outFile) {
     throw std::runtime_error("Failed to open file for writing: " + filename);
+  }
+
+  if (sizeof_addr != 4 && sizeof_addr != 8) {
+    gzclose(outFile);
+    throw std::invalid_argument("sizeof_addr must be 4 or 8, got: " + std::to_string(sizeof_addr));
   }
 
   uLong crc = crc32(0L, Z_NULL, 0);
@@ -140,19 +145,30 @@ uint32_t write_gmem_trace(const std::string &filename) {
     uint8_t op_val = entry.op;
     uint8_t tensor_val = entry.tensor;
     // Cast address to uint32_t for writing, as per original compressed format
-    uint32_t addr_val = static_cast<uint32_t>(entry.addr); 
+    // uint32_t addr_val = static_cast<uint32_t>(entry.addr); 
 
     write_and_crc(&phase_val, sizeof(phase_val));
     write_and_crc(&tid_val, sizeof(tid_val));
     write_and_crc(&op_val, sizeof(op_val));
     write_and_crc(&tensor_val, sizeof(tensor_val));
-    write_and_crc(&addr_val, sizeof(addr_val));
+    // write_and_crc(&addr_val, sizeof(addr_val));
+    if (sizeof_addr == 4) {
+        uint32_t addr_val_32 = static_cast<uint32_t>(entry.addr);
+        write_and_crc(&addr_val_32, sizeof(addr_val_32));
+    } else { // sizeof_addr == 8
+        uint64_t addr_val_64 = entry.addr;
+        write_and_crc(&addr_val_64, sizeof(addr_val_64));
+    }
   }
   gzclose(outFile);
 
   std::cout << "Memory trace written to " << filename << std::endl;
   std::cout << "Collected " << mem_trace.size() << " entries" << std::endl; 
   return static_cast<uint32_t>(crc);
+}
+
+void clear_global_mem_trace() {
+    mem_trace.clear();
 }
 
 void record_access(int thread_id, const std::string &op_str, uint64_t addr) {

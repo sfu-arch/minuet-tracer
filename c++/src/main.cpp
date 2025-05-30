@@ -107,7 +107,7 @@ int main(int argc, char *argv[]) {
     std::cout << "\\nC++ Minuet mapping trace generation complete." << std::endl;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    std::cout << "\\n--- Phase: Gather/Scatter Metadata (C++) ---" << std::endl;
+    std::cout << "\n--- Phase: Metadata  ---" << std::endl;
 
     // Create some metadata for gemm grouping. 
     std::vector<uint32_t> offsets_active;
@@ -173,7 +173,121 @@ int main(int argc, char *argv[]) {
     checksums_json["gemms.bin.gz"] = to_hex_string(gemm_checksum); // This is from greedy_group_result.checksum
     checksums_json["metadata.bin.gz"] = to_hex_string(metadata_checksum);
 
-    std::string checksum_filename = g_config.output_dir + "/checksums.json"; // Added path separator
+    // --- Phase: Gather (C++) ---
+    std::cout << "\n--- Minuet Gather (C++) ---" << std::endl;
+    
+    // Clear previous memory trace before gather operation
+    clear_global_mem_trace(); // Clear mem_trace for gather-specific trace
+
+    // Parameters for mt_gather_cpp
+    // These should align with how they are used/derived in the Python script
+    // and available data in the C++ context.
+    int gather_num_threads = g_config.N_THREADS_GATHER; // From config
+    int gather_num_points = static_cast<int>(unique_indexed_coords.size());
+    int gather_num_offsets = static_cast<int>(offset_coords.size());
+    int gather_num_tiles_per_pt = g_config.NUM_TILES; // NUM_TILES_GATHER in Python, using NUM_TILES from C++ config
+    int gather_tile_feat_size = g_config.TILE_FEATS;  // TILE_FEATS_GATHER in Python, using TILE_FEATS from C++ config
+    int gather_bulk_feat_size = g_config.BULK_FEATS;  // BULK_FEATS_GATHER in Python, using BULK_FEATS from C++ config
+    
+    // source_masks is masks.in_mask
+    const std::vector<int32_t>& gather_source_masks = masks.in_mask;
+    
+    // sources is an empty vector (float type) as per requirement
+    std::vector<float> gather_sources; 
+    
+    size_t gemm_buffer_size = static_cast<size_t>(total_slots) * g_config.TOTAL_FEATS_PT;
+    std::vector<float> gather_gemm_buffers(0, 0.0f); // Initialize with zeros. None initialization. Only need traces. 
+
+    std::cout << "Gather parameters:" << std::endl;
+    std::cout << "  num_threads: " << gather_num_threads << std::endl;
+    std::cout << "  num_points: " << gather_num_points << std::endl;
+    std::cout << "  num_offsets: " << gather_num_offsets << std::endl;
+    std::cout << "  num_tiles_per_pt: " << gather_num_tiles_per_pt << std::endl;
+    std::cout << "  tile_feat_size: " << gather_tile_feat_size << std::endl;
+    std::cout << "  bulk_feat_size: " << gather_bulk_feat_size << std::endl;
+    std::cout << "  in_mask size: " << gather_source_masks.size() << std::endl;
+    std::cout << "  sources size: " << gather_sources.size() << " (empty as intended)" << std::endl;
+    std::cout << "  gemm_buffers size: " << gather_gemm_buffers.size() << std::endl;
+
+
+    mt_gather_cpp(
+        gather_num_threads,
+        gather_num_points,
+        gather_num_offsets,
+        gather_num_tiles_per_pt,
+        gather_tile_feat_size,
+        gather_bulk_feat_size,
+        gather_source_masks,
+        gather_sources,       // Empty sources
+        gather_gemm_buffers
+    );
+
+    uint32_t gather_trace_checksum = 0;
+    try {
+        // Assuming write_gmem_trace uses the global mem_trace which now contains gather accesses
+        gather_trace_checksum = write_gmem_trace(g_config.output_dir + "gather_trace.bin.gz",8);
+        std::cout << "C++ calculated CRC32 for gather trace: " << to_hex_string(gather_trace_checksum) << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error during gather trace writing: " << e.what() << std::endl;
+        // Decide if to return 1 or continue for scatter
+    }
+
+    // --- End of Gather Phase ---
+    // Write checksums to checksums.json
+    checksums_json["gather_trace.bin.gz"] = to_hex_string(gather_trace_checksum);
+
+    // --- Phase: Scatter (C++) ---
+    std::cout << "\\n--- Minuet Scatter (C++) ---" << std::endl;
+    clear_global_mem_trace(); // Clear mem_trace for scatter-specific trace
+
+    // Parameters for mt_scatter_cpp
+    int scatter_num_threads = g_config.N_THREADS_GATHER; 
+    int scatter_num_points = static_cast<int>(unique_indexed_coords.size());
+    int scatter_num_offsets = static_cast<int>(offset_coords.size());
+    int scatter_num_tiles_per_pt = g_config.NUM_TILES; 
+    int scatter_tile_feat_size = g_config.TILE_FEATS;
+    int scatter_bulk_feat_size = g_config.BULK_FEATS;
+    const std::vector<int32_t>& scatter_out_mask = masks.out_mask;
+    
+    std::vector<float> scatter_gemm_buffers;
+    std::vector<float> scatter_outputs; 
+
+    std::cout << "Scatter parameters:" << std::endl;
+    std::cout << "  num_threads: " << scatter_num_threads << std::endl;
+    std::cout << "  num_points: " << scatter_num_points << std::endl;
+    std::cout << "  num_offsets: " << scatter_num_offsets << std::endl;
+    std::cout << "  num_tiles_per_pt: " << scatter_num_tiles_per_pt << std::endl;
+    std::cout << "  tile_feat_size: " << scatter_tile_feat_size << std::endl;
+    std::cout << "  bulk_feat_size: " << scatter_bulk_feat_size << std::endl;
+    std::cout << "  out_mask size: " << scatter_out_mask.size() << std::endl;
+    std::cout << "  gemm_buffers size: " << scatter_gemm_buffers.size() << " (empty as per Python None)" << std::endl;
+    std::cout << "  outputs size: " << scatter_outputs.size() << " (empty as per Python None)" << std::endl;
+
+    mt_scatter_cpp(
+        scatter_num_threads,
+        scatter_num_points,
+        scatter_num_offsets,
+        scatter_num_tiles_per_pt,
+        scatter_tile_feat_size,
+        scatter_bulk_feat_size,
+        scatter_out_mask,
+        scatter_gemm_buffers, // Empty, as per Python's None
+        scatter_outputs       // Empty, as per Python's None
+    );
+
+    uint32_t scatter_trace_checksum = 0;
+    try {
+        scatter_trace_checksum = write_gmem_trace(g_config.output_dir + "scatter_trace.bin.gz", 8); // sizeof_addr = 8
+        std::cout << "C++ calculated CRC32 for scatter trace: " << to_hex_string(scatter_trace_checksum) << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error during scatter trace writing: " << e.what() << std::endl;
+    }
+
+    // --- End of Scatter Phase ---
+    checksums_json["scatter_trace.bin.gz"] = to_hex_string(scatter_trace_checksum);
+
+    // Final write of all checksums
+    std::string checksum_filename = g_config.output_dir + "/checksums.json";
     std::ofstream checksum_file(checksum_filename);
     if (checksum_file.is_open()) {
         checksum_file << std::setw(2) << checksums_json << std::endl;
@@ -183,13 +297,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "Error: Unable to open " << checksum_filename << " for writing." << std::endl;
     }
 
-   
-    // --- Start of Gather Logic Integration ---
-    // This comment and the code below it seems to be a leftover from a previous state or a duplicate thought process.
-    // The gather logic has been implemented above.
-    // std::cout << "\\n--- Minuet Gather (C++) ---" << std::endl;
-    // ... remove duplicated or obsolete gather logic here ...
-
+    // ... existing return 0 ...
     return 0;
 }
 

@@ -154,6 +154,7 @@ void set_curr_phase(const std::string& phase_name);
 std::string get_curr_phase();
 void set_debug_flag(bool debug_val);
 bool get_debug_flag();
+void clear_global_mem_trace(); // Added to clear the global memory trace
 
 // --- Function Declarations (matching Python functions) ---
 
@@ -164,10 +165,15 @@ bool get_debug_flag();
 
 // Memory tracing
 uint8_t addr_to_tensor(uint64_t addr);
-void record_access(int thread_id, const std::string& op, uint64_t addr); // op is "R" or "W"
-uint32_t write_gmem_trace(const std::string& filename); // Return checksum
+std::string addr_to_tensor_str(uint64_t addr);
 
-// Algorithm phases
+// Function to write the global memory trace to a gzipped file
+// Returns a CRC32 checksum of the written data.
+uint32_t write_gmem_trace(const std::string &filename, int sizeof_addr = 4); // Added sizeof_addr parameter with default 4
+
+void record_access(int thread_id, const std::string &op_str, uint64_t addr);
+
+// --- Algorithm Phases ---
 std::vector<uint32_t> radix_sort_with_memtrace(std::vector<uint32_t>& arr, uint64_t base_addr);
 
 std::vector<IndexedCoord> compute_unique_sorted_coords(

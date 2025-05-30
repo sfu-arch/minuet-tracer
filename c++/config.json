@@ -18,7 +18,7 @@
   "NUM_TILES": 4,
   "TILE_FEATS": 16,
   "BULK_FEATS": 4,
-  "N_THREADS_GATHER": 1,
+  "N_THREADS_GATHER": 8,
   "debug": false,
   "NUM_PIVOTS": 2,
   "output_dir": "out/"
