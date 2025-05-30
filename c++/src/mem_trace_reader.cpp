@@ -1,15 +1,20 @@
 #include <string>
 #include <algorithm> // For std::transform
+#include <any> // For std::any_cast
 #include <cstdint>
+#include <cstdlib> // For std::exit
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <sstream> // For std::stringstream
 #include <stdexcept>
+#include <tuple> // For std::tuple
 #include <vector>
 #include <zlib.h>
 #include "sorted_map.hpp"
 #include "trace.hpp"
+#include "ext/argparse.hpp"
 
 // It's generally better to have these global maps (PHASES, OPS, TENSORS)
 // accessible if this reader is part of the larger project.
@@ -299,21 +304,51 @@ const std::vector<MemoryAccessEntry> &MemTraceReader::get_raw_trace() const {
 // Example main for testing the reader (compile separately or include in a test
 // build)
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    std::cerr << "Usage: ./minuet_mem_trace_reader <trace_file.bin.gz> "
-                 "[sizeof_addr (4 or 8, default 4)] [filter_phase] [filter_op] "
-                 "[filter_tensor] [aggregate (0 or 1)] [max_entries]"
-              << std::endl;
-    return 1;
+  argparse::ArgumentParser program("mem_trace_reader");
+
+  program.add_argument("--trace-file")
+    .required()
+    .help("Input file in .gz format");
+
+  program.add_argument("--sizeof-addr")
+    .help("Size of addresses in the trace file (4 or 8 bytes)")
+    .default_value("4");
+
+  program.add_argument("--filter-phase")
+    .default_value(std::string(""))
+    .help("Filter trace by phase string");
+
+  program.add_argument("--filter-op")
+    .default_value(std::string(""))
+    .help("Filter trace by operation string (e.g., R, W)");
+
+  program.add_argument("--filter-tensor")
+    .default_value(std::string(""))
+    .help("Filter trace by tensor string");
+
+  program.add_argument("--aggregate")
+    .help("Aggregate identical trace entries and show counts")
+    .default_value(false)
+    .implicit_value(true);
+
+  program.add_argument("--max-entries")
+    .help("Maximum number of trace entries to print (0 for all)")
+    .default_value("0");
+
+  try {
+    program.parse_args(argc, argv);
+  } catch (const std::runtime_error& err) {
+    std::cerr << err.what() << std::endl;
+    std::exit(1);
   }
 
-  std::string trace_file = argv[1];
-  int sizeof_addr = (argc > 2) ? std::stoi(argv[2]) : 4;
-  std::string filter_phase = (argc > 3) ? argv[3] : "";
-  std::string filter_op = (argc > 4) ? argv[4] : "";
-  std::string filter_tensor = (argc > 5) ? argv[5] : "";
-  bool aggregate = (argc > 6) ? (std::stoi(argv[6]) != 0) : false;
-  int max_entries = (argc > 7) ? std::stoi(argv[7]) : 0;
+  std::string trace_file = program.get<std::string>("--trace-file");
+  int sizeof_addr = std::stoi(program.get<std::string>("--sizeof-addr"));
+  std::string filter_phase = program.get<std::string>("--filter-phase");
+  std::string filter_op = program.get<std::string>("--filter-op");
+  std::string filter_tensor = program.get<std::string>("--filter-tensor");
+  bool aggregate = program.get<bool>("--aggregate");
+  int max_entries = std::stoi(program.get<std::string>("--max-entries"));
 
   // For true standalone compilation, define PHASES, OPS, TENSORS locally.
   // These definitions should match those in minuet_trace.cpp
