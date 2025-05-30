@@ -15,7 +15,7 @@ import minuet_config  # Import minuet_config for configuration settings
 # from minuet_config import output_dir # Original import
 import minuet_mapping as mapping_module # To access mapping_module.curr_phase
 from minuet_utils import file_checksum
-
+from pprint import pprint
 
 # def file_checksum(filename):
 #     """Calculate SHA-256 checksum of a file"""
@@ -319,8 +319,12 @@ def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
     """
     n = len(slots)
     # Verify list is sorted
-    if not all(slots[i] >= slots[i + 1] for i in range(n - 1)):
-        raise ValueError("slots must be sorted in descending order")
+    for i in range(n - 1):
+        if slots[i] < slots[i + 1]:
+            raise ValueError("slots must be sorted in descending order")
+        
+    # if not all(slots[i] >= slots[i + 1] for i in range(n - 1)):
+        # raise ValueError("slots must be sorted in descending order")
     
     # pair each slot with its original index, sort descending
     # Slot is already sorted, so we can just enumerate
@@ -380,7 +384,7 @@ def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
             'padding': g[3]-g[2]
         })
             
-    print(gemm_list)
+    pprint(gemm_list)
     # Write out the gemm list to file.
     checksum = write_gemm_list(gemm_list)
 

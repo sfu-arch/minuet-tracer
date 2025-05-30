@@ -8,7 +8,7 @@ if __name__ == '__main__':
     global phase
     # Input data
     # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-    in_coords, _ = read_point_cloud("/Path/To/000000.bin")
+    in_coords, _ = read_point_cloud("/Users/ashriram/Desktop/minuet-tracer/examples/000000.bin")
     
     # visualize_point_cloud(in_coords)
 
@@ -81,8 +81,11 @@ if __name__ == '__main__':
 
     # No need to sort kmap as it's already a SortedByValueLengthDict
     # Sparse list of offsets with matches
+    # For some reason cache is not none even if we don't use it
+    # So invalidate it first.
+    kmap._invalidate_cache()
+    kmap._get_sorted_keys()
     offsets_active = list(kmap._get_sorted_keys())
-
     # Number of slots required by each offset
     slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
     

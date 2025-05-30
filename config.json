@@ -12,14 +12,14 @@
   "WO_BASE": "0x80000000",
   "IV_BASE": "0x100000000",
   "WV_BASE": "0xF00000000",
-  "GEMM_ALIGNMENT": 4,
-  "GEMM_WT_GROUP": 2,
-  "GEMM_SIZE": 4,
+  "GEMM_ALIGNMENT": 16384,
+  "GEMM_WT_GROUP": 4,
+  "GEMM_SIZE": 16384,
   "NUM_TILES_GATHER": 4,
   "TILE_FEATS_GATHER": 16,
   "BULK_FEATS_GATHER": 4,
   "N_THREADS_GATHER": 1,
-  "debug": true,
+  "debug": false,
   "output_dir": "./out/",
   "NUM_PIVOTS": 2
 }
