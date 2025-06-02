@@ -86,9 +86,12 @@ std::string to_hex_string(uint64_t val) {
 int main(int argc, char *argv[]) {
   // Setup argument parser
   argparse::ArgumentParser program("minuet_trace");
-
   program.add_argument("--simbin-file")
       .help("Path to the simbin point cloud file");
+  program.add_argument("--kernel", "-k")
+      .help("Size of kernel 3x3x3, 5x5x5, etc. (e.g., 3 for 3x3x3)")
+      .default_value(std::uint32_t(3))
+      .scan<'i', int>();
 
   program.add_argument("--config", "-c")
       .help("Path to the configuration JSON file")
@@ -122,27 +125,51 @@ int main(int argc, char *argv[]) {
     }
   }
   if (raw_inputs.empty()) {
-    std::cerr << "Warning: No coordinates loaded from simbin file" << std::endl;
-    // Fall back to default coordinates for testing
-    raw_inputs = {{1, 5, 0}, {0, 0, 2}, {0, 1, 1}, {0, 0, 3}};
-    std::cout << "Using default coordinates for testing" << std::endl;
+    exit(1); // Exit if no inputs are provided
   }
 
   std::vector<Coord3D> inputs = tuples_to_coords(raw_inputs);
 
   int stride = 1;
+  int lb = 0, ub = 0;
+  if (program.is_used("--kernel")) {
+    auto knl = program.get<int>("--kernel");
+    if (knl < 3 || knl > 7 || knl % 2 == 0) {
+      std::cerr << "Invalid kernel size. Must be an odd number between 3 and 7."
+                << std::endl;
+      return 1;
+    }
+    switch (knl) {
+      case 3:
+        lb = -1;
+        ub = 1;
+        break;
+      case 5:
+        lb = -2;
+        ub = 2;
+        break;
+      case 7:
+        lb = -3;
+        ub = 3;
+        break;
+      default:
+        std::cerr << "Unsupported kernel size: " << knl << std::endl;
+        return 1;
+    }
+  }
+
   std::vector<std::tuple<int, int, int>> offsets_raw; // Renamed from offsets
-  for (int dx = -1; dx <= 1; ++dx) {
-    for (int dy = -1; dy <= 1; ++dy) {
-      for (int dz = -1; dz <= 1; ++dz) {
-        offsets_raw.emplace_back(dx, dy, dz);
+  for (int x = lb; x <= ub; ++x) {
+    for (int y = lb; y <= ub; ++y) {
+      for (int z = lb; z <= ub; ++z) {
+        offsets_raw.emplace_back(x, y, z);
       }
     }
   }
+
   std::vector<Coord3D> offset_coords = tuples_to_coords(offsets_raw);
 
   // --- Phase 1: Radix Sort (Unique Sorted Input Coords with Original Indices)
-  // ---
   std::cout << "\n--- Phase: " << PHASES.inverse.at(0) << " with "
             << g_config.NUM_THREADS << " threads ---" << std::endl;
   std::vector<IndexedCoord> unique_indexed_coords =

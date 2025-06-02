@@ -31,7 +31,7 @@ MinuetConfig::MinuetConfig() :
     TILE_FEATS(16), // Changed default value
     BULK_FEATS(4), // Changed default value
     N_THREADS_GATHER(8), // Changed default value
-    TOTAL_FEATS_PT(256), // Changed default value
+    TOTAL_FEATS_PT(TILE_FEATS*NUM_TILES), // Changed default value
     debug(false), // Initialize debug flag
     output_dir("./trace_out"), // Initialize output_dir
     NUM_PIVOTS(2) // Default value for NUM_PIVOTS

@@ -6,6 +6,7 @@ c++17 compatible compiler for running c++ version
 # https://www.anaconda.com/docs/getting-started/miniconda/install
 pip3 install open3d
 pip3 install pybind11
+pip3 install tqdm
 sudo apt-get install zlib1g-dev
 # You have to install within conda. If you install in system python, cmake will have issues finding the pybind11 headers. see CI.yml for cmake command.
 ```
@@ -29,11 +30,12 @@ cd c++; cmake -B build; cd build; make
 ```
 
 ```bash
-# Main runs
+# Main runs. Support for kernels from 3x3x3 to 7x7x7
 python3 main_minuet.py --pcl-file ./examples/000000.bin --kernel 3 --config ./config.json
 # For c++ version, first convert to simbin file
 python3 read_pcl.py --file examples/000000.bin --write-simbin
-
+# Assume you have already built the c++ version
+./main_minuet_cpp --simbin-file ../../examples/000000.simbin --kernel 3 --config ../config.json
 ```
 
 

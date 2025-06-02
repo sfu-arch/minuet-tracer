@@ -41,18 +41,18 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.12")
 endif()
 
 # Remove the old executable target if it exists, or comment it out
-add_executable(minuet_trace_cpp
+add_executable(main_minuet_cpp
     src/main.cpp
     src/minuet_map.cpp
     src/minuet_config.cpp
     src/coord.cpp
     src/minuet_gather.cpp   
 )
-target_include_directories(minuet_trace_cpp PUBLIC
+target_include_directories(main_minuet_cpp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${ZLIB_INCLUDE_DIRS}
 )
-target_link_libraries(minuet_trace_cpp PUBLIC
+target_link_libraries(main_minuet_cpp PUBLIC
     ${ZLIB_LIBRARIES}
     Threads::Threads
 )
