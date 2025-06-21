@@ -553,7 +553,7 @@ def gather_thread(
                     bulk_start_addr = dest_base + b * bulk_feat_size
                     if bulk is not None:
                         gemm_buffers[bulk_start_addr : bulk_start_addr + bulk_feat_size] = bulk
-                    record_local(thread_id, mapping_module.OPS['W'], minuet_config.GM_BASE + bulk_start_addr*minuet_config.SIZE_FEAT)
+                    record_local(thread_id, mapping_module.OPS['W'], int(np.uint64(minuet_config.GM_BASE) + bulk_start_addr*minuet_config.SIZE_FEAT))
     flush_local_trace()
     
 
@@ -678,7 +678,7 @@ def scatter_thread(
                     source_bulk_addr = source_tile_base + bulk_offset
                     
                     # Record read access
-                    record_local(thread_id, mapping_module.OPS['R'], minuet_config.GM_BASE + source_bulk_addr * minuet_config.SIZE_FEAT)
+                    record_local(thread_id, mapping_module.OPS['R'], int(np.uint64(minuet_config.GM_BASE) + source_bulk_addr * minuet_config.SIZE_FEAT))
                     
                     # Actual data loading into tile_data if gemm_buffers is available
                     if gemm_buffers is not None:
