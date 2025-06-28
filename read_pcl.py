@@ -151,6 +151,91 @@ def read_point_cloud(file_path, stride=None, max_points=None):
     print(f"Loaded {len(coords)} points")
     return coords, features
 
+def write_simbin(file_path, coordinates, features=None):
+    """
+    Write 3D point cloud coordinates and optional features to a simbin file.
+
+    Args:
+        file_path (str): Path to the simbin file to write.
+        coordinates (np.ndarray): Array of shape (N, 3), dtype float32 or int32.
+        features (np.ndarray, optional): Array of shape (N, D), dtype float32, or None.
+
+    Raises:
+        ValueError: If coordinates or features have unsupported dtypes or shapes.
+    """
+    # Validate inputs
+    if not isinstance(coordinates, np.ndarray) or coordinates.shape[1] != 3:
+        raise ValueError("Coordinates must be a numpy array of shape (N, 3).")
+    if coordinates.dtype not in [np.float32, np.int32]:
+        raise ValueError("Coordinates must be of dtype float32 or int32.")
+    if features is not None:
+        if not isinstance(features, np.ndarray) or features.shape[0] != coordinates.shape[0]:
+            raise ValueError("Features must be a numpy array with shape (N, D) matching coordinates.")
+        if features.dtype != np.float32:
+            raise ValueError("Features must be of dtype float32.")
+
+    N = coordinates.shape[0]
+    coord_type = 0 if coordinates.dtype == np.float32 else 1
+    feature_dim = 0 if features is None else features.shape[1]
+
+    with open(file_path, 'wb') as f:
+        # Write header
+        header = struct.pack('<6sBBII', b'SIMBIN', 1, coord_type, N, feature_dim)
+        f.write(header)
+        # Write coordinates
+        f.write(coordinates.tobytes())
+        # Write features if present
+        if features is not None:
+            f.write(features.tobytes())
+
+def read_simbin(file_path):
+    """
+    Read 3D point cloud coordinates and optional features from a simbin file.
+
+    Args:
+        file_path (str): Path to the simbin file to read.
+
+    Returns:
+        tuple: (coordinates, features)
+            - coordinates (np.ndarray): Array of shape (N, 3), dtype float32 or int32.
+            - features (np.ndarray or None): Array of shape (N, D), dtype float32, or None.
+
+    Raises:
+        ValueError: If the file is not a valid simbin file.
+    """
+    with open(file_path, 'rb') as f:
+        # Read header
+        header_size = 6 + 1 + 1 + 4 + 4  # Total bytes in header
+        header = f.read(header_size)
+        if len(header) != header_size:
+            raise ValueError("File is too short to contain a valid simbin header.")
+        
+        magic, version, coord_type, N, feature_dim = struct.unpack('<6sBBII', header)
+        if magic != b'SIMBIN':
+            raise ValueError("File does not start with 'SIMBIN' magic number.")
+        if version != 1:
+            raise ValueError("Unsupported simbin version.")
+
+        # Determine coordinate dtype
+        dtype = np.float32 if coord_type == 0 else np.int32
+
+        # Read coordinates
+        coord_bytes = f.read(N * 3 * 4)
+        if len(coord_bytes) != N * 3 * 4:
+            raise ValueError("File does not contain expected coordinate data.")
+        coordinates = np.frombuffer(coord_bytes, dtype=dtype).reshape(N, 3)
+
+        # Read features if present
+        if feature_dim > 0:
+            feature_bytes = f.read(N * feature_dim * 4)
+            if len(feature_bytes) != N * feature_dim * 4:
+                raise ValueError("File does not contain expected feature data.")
+            features = np.frombuffer(feature_bytes, dtype=np.float32).reshape(N, feature_dim)
+        else:
+            features = None
+
+        return coordinates, features
+
 def visualize_point_cloud(coords, features=None):
     """Visualize point cloud using Open3D"""
     coords = np.asarray(coords)

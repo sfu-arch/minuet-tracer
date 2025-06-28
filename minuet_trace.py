@@ -7,10 +7,13 @@ import os
 if __name__ == '__main__':
     global phase
     # Input data
-    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-    # in_coords, _ = read_point_cloud("/Users/ashriram/Desktop/minuet-tracer/examples/000000.bin")
-    
-    # visualize_point_cloud(in_coords)
+    # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
+
+    ####################### Simbin Conversion Test #######################
+    in_coords_orig, features_orig = read_point_cloud("examples/000000.bin")
+    write_simbin("examples/000000.simbin", in_coords_orig, features_orig)
+    in_coords, features = read_simbin("examples/000000.simbin")
+    visualize_point_cloud(in_coords)
 
     stride = 1
     off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
