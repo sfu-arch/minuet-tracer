@@ -9,10 +9,18 @@ if __name__ == '__main__':
     # Input data
     # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
 
-    ####################### Simbin Conversion Test #######################
-    in_coords_orig, features_orig = read_point_cloud("examples/000000.bin")
-    write_simbin("examples/000000.simbin", in_coords_orig, features_orig)
-    in_coords, features = read_simbin("examples/000000.simbin")
+    ############# Sampling All SemanticKITTI Voxel Dataset #############
+    script_dir = Path(__file__).parent.resolve()
+    src_path = script_dir / '../Datasets/Data/dataset/sequences/00/voxels'
+    src_path = src_path.resolve()
+    dest_path = script_dir / 'examples'
+    dest_path = dest_path.resolve()
+    sample_point_clouds(src_path, dest_path, 10)
+
+    ####################### Load Sample Input #######################
+    sample_path = dest_path / '000000.simbin'
+    sample_path = sample_path.resolve()
+    in_coords, features = read_simbin(sample_path)
     visualize_point_cloud(in_coords)
 
     stride = 1

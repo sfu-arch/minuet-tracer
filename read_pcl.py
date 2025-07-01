@@ -5,6 +5,8 @@ import open3d as o3d
 from pathlib import Path
 import pandas as pd
 import argparse
+import shutil
+import random
 
 def read_point_cloud(file_path, stride=None, max_points=None):
     """
@@ -235,6 +237,99 @@ def read_simbin(file_path):
             features = None
 
         return coordinates, features
+
+def sample_point_clouds(source_dir, dest_dir, samples_per_category):
+    """
+    Samples point clouds from a source directory, categorizes them by size,
+    and saves them to a destination directory, including a .simbin version.
+
+    Args:
+        source_dir (str): The directory containing the original point cloud files.
+        dest_dir (str): The directory where sampled files will be saved.
+        samples_per_category (int): The number of samples to take from each category.
+    """
+    source_path = Path(source_dir)
+    dest_path = Path(dest_dir)
+
+    # Create destination directory if it doesn't exist
+    dest_path.mkdir(parents=True, exist_ok=True)
+
+    # 1. Find all point cloud files and get their point counts
+    all_files = []
+    supported_extensions = ['.ply', '.pcd', '.txt', '.bin', '.npy', '.csv']
+    print("Scanning for point cloud files...")
+    for file_path in source_path.rglob('*'):
+        if file_path.suffix.lower() in supported_extensions:
+            try:
+                coords, _ = read_point_cloud(str(file_path))
+                point_count = len(coords)
+                all_files.append({'path': file_path, 'count': point_count})
+            except Exception as e:
+                print(f"Could not process {file_path}: {e}")
+
+    if not all_files:
+        print("No compatible point cloud files found.")
+        return
+
+    # 2. Sort files by point count
+    all_files.sort(key=lambda x: x['count'])
+
+    # 3. Determine categories and ranges
+    num_files = len(all_files)
+    third = num_files // 3
+    
+    small_files = all_files[:third]
+    medium_files = all_files[third:2*third]
+    large_files = all_files[2*third:]
+
+    categories = {
+        'small': small_files,
+        'medium': medium_files,
+        'large': large_files
+    }
+
+    # Print category ranges
+    if small_files:
+        print(f"\nSmall samples range: {small_files[0]['count']} to {small_files[-1]['count']} points.")
+    if medium_files:
+        print(f"Medium samples range: {medium_files[0]['count']} to {medium_files[-1]['count']} points.")
+    if large_files:
+        print(f"Large samples range: {large_files[0]['count']} to {large_files[-1]['count']} points.")
+    print("-" * 30)
+
+    # 4. Sample, copy, and convert files
+    for category_name, file_list in categories.items():
+        category_path = dest_path / category_name
+        category_path.mkdir(exist_ok=True)
+
+        if not file_list:
+            print(f"No files in category: {category_name}")
+            continue
+
+        # Randomly sample files from the category
+        num_to_sample = min(samples_per_category, len(file_list))
+        sampled_files = random.sample(file_list, num_to_sample)
+        print(f"Sampling {num_to_sample} files for '{category_name}' category...")
+
+        for file_info in sampled_files:
+            original_path = file_info['path']
+            dest_file_path = category_path / original_path.name
+            
+            # a. Copy the original file
+            print(f"  Copying {original_path.name} to {category_path}")
+            shutil.copy(original_path, dest_file_path)
+
+            # b. Convert to .simbin and save
+            try:
+                coords, features = read_point_cloud(str(original_path))
+                simbin_path = category_path / (original_path.stem + '.simbin')
+                print(f"  Converting {original_path.name} to {simbin_path.name}")
+                write_simbin(simbin_path, coords, features)
+            except Exception as e:
+                print(f"    Failed to convert {original_path.name} to simbin: {e}")
+
+    print("\nSampling process completed.")
+
 
 def visualize_point_cloud(coords, features=None):
     """Visualize point cloud using Open3D"""
