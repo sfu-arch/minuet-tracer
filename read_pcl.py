@@ -1,3 +1,4 @@
+
 import numpy as np
 import os
 import struct
@@ -5,11 +6,6 @@ import open3d as o3d
 from pathlib import Path
 import pandas as pd
 import argparse
-<<<<<<< HEAD
-import shutil
-import random
-||||||| parent of 2a43493 (Adding support for simbin)
-=======
 def write_simbin_file(file_path, coords, features=None):
     """
     Write point cloud data to a simbin file format
@@ -33,7 +29,6 @@ def write_simbin_file(file_path, coords, features=None):
             for feat in features:
                 f.write(struct.pack('f' * len(feat), *feat))
     return 
->>>>>>> 2a43493 (Adding support for simbin)
 
 
 def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True):
