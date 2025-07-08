@@ -1,3 +1,4 @@
+
 from minuet_mapping import *
 from minuet_gather import *
 from minuet_config import *
@@ -10,30 +11,6 @@ import argparse
 if __name__ == '__main__':
     global phase
     # Input data
-<<<<<<< HEAD
-    # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-
-    ############# Sampling All SemanticKITTI Voxel Dataset #############
-    script_dir = Path(__file__).parent.resolve()
-    src_path = script_dir / '../Datasets/Data/dataset/sequences/00/voxels'
-    src_path = src_path.resolve()
-    dest_path = script_dir / 'examples'
-    dest_path = dest_path.resolve()
-    sample_point_clouds(src_path, dest_path, 10)
-
-    ####################### Load Sample Input #######################
-    sample_path = dest_path / '000000.simbin'
-    sample_path = sample_path.resolve()
-    in_coords, features = read_simbin(sample_path)
-    visualize_point_cloud(in_coords)
-
-||||||| parent of 2a43493 (Adding support for simbin)
-    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-    # in_coords, _ = read_point_cloud("/Users/ashriram/Desktop/minuet-tracer/examples/000000.bin")
-    
-    # visualize_point_cloud(in_coords)
-
-=======
     
     in_coords = []
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
@@ -45,7 +22,6 @@ if __name__ == '__main__':
     else:
         in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]  
         
->>>>>>> 2a43493 (Adding support for simbin)
     stride = 1
     off_coords = []
     if args.kernel == 3:
