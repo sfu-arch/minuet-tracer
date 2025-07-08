@@ -22,11 +22,20 @@ There are three main scripts in this repository:
 
 ```bash
 # Python version. Feature complete.
-python3 minuet_trace.py --config config.json
+python3 test_minuet.py --config config.json
 # c++ version. Scatter pending
 cd c++; cmake -B build; cd build; make
 ./minuet_trace_cpp --config ../config.json
 ```
+
+```bash
+# Main runs
+python3 main_minuet.py --pcl-file ./examples/000000.bin --kernel 3 --config ./config.json
+# For c++ version, first convert to simbin file
+python3 read_pcl.py --file examples/000000.bin --write-simbin
+
+```
+
 
 ### Output files produced:**
 ```bash

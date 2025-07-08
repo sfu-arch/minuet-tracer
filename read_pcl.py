@@ -5,10 +5,38 @@ import open3d as o3d
 from pathlib import Path
 import pandas as pd
 import argparse
+<<<<<<< HEAD
 import shutil
 import random
+||||||| parent of 2a43493 (Adding support for simbin)
+=======
+def write_simbin_file(file_path, coords, features=None):
+    """
+    Write point cloud data to a simbin file format
+    
+    Args:
+        file_path: Path to output simbin file
+        coords: List of (x,y,z) coordinates
+        features: List of feature vectors (optional)
+    """
+    with open(file_path, 'wb') as f:
+        # Write header
+        f.write(b'SIMBIN')
+        f.write(struct.pack('I', len(coords)))  # Number of points
+        
+        # Write coordinates
+        for coord in coords:
+            f.write(struct.pack('fff', *coord))
+        
+        # Write features if available
+        if features is not None:
+            for feat in features:
+                f.write(struct.pack('f' * len(feat), *feat))
+    return 
+>>>>>>> 2a43493 (Adding support for simbin)
 
-def read_point_cloud(file_path, stride=None, max_points=None):
+
+def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True):
     """
     Read point cloud data from various formats and prepare for Minuet processing
     
@@ -151,6 +179,9 @@ def read_point_cloud(file_path, stride=None, max_points=None):
         features = None
     
     print(f"Loaded {len(coords)} points")
+    # Write coordinates and features to simbin file
+    write_simbin_file("output.simbin", coords, features)
+
     return coords, features
 
 def write_simbin(file_path, coordinates, features=None):
@@ -367,11 +398,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Read and visualize point cloud data")
     parser.add_argument("--file", type=str, help="Path to point cloud file")
     parser.add_argument("--stride", type=float, default=None, help="Voxel size for quantization")
+    parser.add_argument("--write-simbin", action='store_true', help="Write output to simbin format", default=False)
 
     args = parser.parse_args()
     if args.stride:
-        coords, features = read_point_cloud(args.file, args.stride)
+        coords, features = read_point_cloud(args.file, args.stride, write_simbin=args.write_simbin)
     else:
-        coords, features = read_point_cloud(args.file)
+        coords, features = read_point_cloud(args.file, write_simbin=args.write_simbin)
     print(coords)
     visualize_point_cloud(coords, features)

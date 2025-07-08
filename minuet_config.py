@@ -36,19 +36,28 @@ NUM_TILES_GATHER = 4  # Renamed from NUM_TILES to distinguish if needed, maps to
 TILE_FEATS_GATHER = 16 # Renamed from TILE_FEATS, maps to JSON TILE_FEATS
 BULK_FEATS_GATHER = 4  # Renamed from BULK_FEATS, maps to JSON BULK_FEATS
 N_THREADS_GATHER = 1   # This is the gather-specific thread count
-TOTAL_FEATS_PT_GATHER = NUM_TILES_GATHER * TILE_FEATS_GATHER # Default calculation
+TOTAL_FEATS_PT = NUM_TILES_GATHER * TILE_FEATS_GATHER # Default calculation
 
 # New parameter from C++ config
 NUM_PIVOTS = 2 # Default value
 
-# --- Load Configuration from JSON ---
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_config_json_path = os.path.join(_current_dir, "config.json")
-
-try:
-    with open(_config_json_path, 'r') as f:
-        _config_data = json.load(f)
-    print(f"Successfully loaded configuration from {_config_json_path}")
+def get_config(_config_path):
+    global debug, output_dir, NUM_THREADS, SIZE_KEY, SIZE_INT, SIZE_WEIGHT
+    global I_BASE, TILE_BASE, QK_BASE, QI_BASE, QO_BASE, PIV_BASE, KM_BASE, WO_BASE, IV_BASE, WV_BASE
+    global GEMM_ALIGNMENT, GEMM_WT_GROUP, GEMM_SIZE
+    global NUM_TILES_GATHER, TILE_FEATS_GATHER, BULK_FEATS_GATHER, N_THREADS_GATHER, TOTAL_FEATS_PT_GATHER
+    global NUM_PIVOTS
+    global TOTAL_FEATS_PT
+    try:
+        with open(_config_path, 'r') as f:
+            _config_data = json.load(f)
+        print(f"Successfully loaded configuration from {_config_path}")
+    except FileNotFoundError:
+        print(f"Warning: Configuration file '{_config_path}' not found. Using default values.")
+    except json.JSONDecodeError:
+        print(f"Warning: Error decoding JSON from '{_config_path}'. Using default values.")
+    except Exception as e:
+        print(f"Warning: An unexpected error occurred while loading configuration: {e}. Using default values.")
 
     # Helper for hex string to int conversion
     def _hex_to_int(value, default_val):
@@ -62,7 +71,7 @@ try:
             return value
         print(f"Warning: Unexpected type for hex value '{value}'. Using default {hex(default_val)}.")
         return default_val
-
+    print(_config_data)
     # Override defaults with values from JSON
     debug = _config_data.get("debug", debug)
     output_dir = _config_data.get("output_dir", output_dir)
@@ -96,20 +105,14 @@ try:
     TOTAL_FEATS_PT_GATHER = _config_data.get("TOTAL_FEATS_PT", NUM_TILES_GATHER * TILE_FEATS_GATHER)
     NUM_PIVOTS = _config_data.get("NUM_PIVOTS", NUM_PIVOTS)
 
-except FileNotFoundError:
-    print(f"Warning: Configuration file '{_config_json_path}' not found. Using default values.")
-except json.JSONDecodeError:
-    print(f"Warning: Error decoding JSON from '{_config_json_path}'. Using default values.")
-except Exception as e:
-    print(f"Warning: An unexpected error occurred while loading configuration: {e}. Using default values.")
-
-# For compatibility with scripts that might expect these specific names from the old minuet_config.py
-# These were the names used under the "GATHER PARAMETERS" section
-NUM_TILES = NUM_TILES_GATHER
-TILE_FEATS = TILE_FEATS_GATHER
-BULK_FEATS = BULK_FEATS_GATHER
-N_THREADS = N_THREADS_GATHER # For gather simulation if it uses N_THREADS
-TOTAL_FEATS_PT = TOTAL_FEATS_PT_GATHER
+    
+    # For compatibility with scripts that might expect these specific names from the old minuet_config.py
+    # These were the names used under the "GATHER PARAMETERS" section
+    NUM_TILES = NUM_TILES_GATHER
+    TILE_FEATS = TILE_FEATS_GATHER
+    BULK_FEATS = BULK_FEATS_GATHER
+    N_THREADS = N_THREADS_GATHER # For gather simulation if it uses N_THREADS
+    TOTAL_FEATS_PT = TOTAL_FEATS_PT_GATHER
 
 # Clean up temporary variables from global namespace (optional)
 # These are prefixed with _ so they are less likely to cause issues if not deleted.

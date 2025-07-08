@@ -10,51 +10,12 @@ import argparse
 if __name__ == '__main__':
     global phase
     # Input data
-<<<<<<< HEAD
-    # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-
-    ############# Sampling All SemanticKITTI Voxel Dataset #############
-    script_dir = Path(__file__).parent.resolve()
-    src_path = script_dir / '../Datasets/Data/dataset/sequences/00/voxels'
-    src_path = src_path.resolve()
-    dest_path = script_dir / 'examples'
-    dest_path = dest_path.resolve()
-    sample_point_clouds(src_path, dest_path, 10)
-
-    ####################### Load Sample Input #######################
-    sample_path = dest_path / '000000.simbin'
-    sample_path = sample_path.resolve()
-    in_coords, features = read_simbin(sample_path)
-    visualize_point_cloud(in_coords)
-
-||||||| parent of 2a43493 (Adding support for simbin)
-    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-    # in_coords, _ = read_point_cloud("/Users/ashriram/Desktop/minuet-tracer/examples/000000.bin")
     
-    # visualize_point_cloud(in_coords)
-
-=======
     
-    in_coords = []
-    parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
-    parser.add_argument('--pcl-file', type=str)
-    parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping",default=3)
-    args = parser.parse_args()
-    if args.pcl_file:
-        in_coords, _ = read_point_cloud(args.pcl_file)
-    else:
-        in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]  
-        
->>>>>>> 2a43493 (Adding support for simbin)
+    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]  
     stride = 1
-    off_coords = []
-    if args.kernel == 3:
-        off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
-    elif args.kernel == 5:
-        off_coords = [(dx,dy,dz) for dx in (-2,-1,0,1,2) for dy in (-2,-1,0,1,2) for dz in (-2,-1,0,1,2)]
-    # off_coords = [(0,1,-1)]
-    # for i in range(len(off_coords)):
-        # print(f"Offset {i}: {off_coords[i]}")
+    off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
+    
     ####################### Phase 1 Mapping #######################
     
     # Phase 1: Sort and deduplicate input coordinates
@@ -117,8 +78,6 @@ if __name__ == '__main__':
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
 
-    # No need to sort kmap as it's already a SortedByValueLengthDict
-    # Sparse list of offsets with matches
     # For some reason cache is not none even if we don't use it
     # So invalidate it first.
     kmap._invalidate_cache()
@@ -150,7 +109,6 @@ if __name__ == '__main__':
     metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
 
     ############## Phase 3: Gather/Scatter Simulation ##############
-
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")

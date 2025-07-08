@@ -10,51 +10,28 @@ import argparse
 if __name__ == '__main__':
     global phase
     # Input data
-<<<<<<< HEAD
-    # in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-
-    ############# Sampling All SemanticKITTI Voxel Dataset #############
-    script_dir = Path(__file__).parent.resolve()
-    src_path = script_dir / '../Datasets/Data/dataset/sequences/00/voxels'
-    src_path = src_path.resolve()
-    dest_path = script_dir / 'examples'
-    dest_path = dest_path.resolve()
-    sample_point_clouds(src_path, dest_path, 10)
-
-    ####################### Load Sample Input #######################
-    sample_path = dest_path / '000000.simbin'
-    sample_path = sample_path.resolve()
-    in_coords, features = read_simbin(sample_path)
-    visualize_point_cloud(in_coords)
-
-||||||| parent of 2a43493 (Adding support for simbin)
-    in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]
-    # in_coords, _ = read_point_cloud("/Users/ashriram/Desktop/minuet-tracer/examples/000000.bin")
-    
-    # visualize_point_cloud(in_coords)
-
-=======
     
     in_coords = []
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
-    parser.add_argument('--pcl-file', type=str)
-    parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping",default=3)
+    parser.add_argument('--pcl-file', type=str, required=True, help="Path to the point cloud file")
+    parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping")
+    parser.add_argument('--config', type=str, default='minuet_config.py', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
+    
+    # Load configuration
+    get_config(args.config)
+    
+    
     if args.pcl_file:
         in_coords, _ = read_point_cloud(args.pcl_file)
-    else:
-        in_coords = [(1,5,0), (0,0,2), (0,1,1), (0,0,3)]  
         
->>>>>>> 2a43493 (Adding support for simbin)
     stride = 1
     off_coords = []
     if args.kernel == 3:
         off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     elif args.kernel == 5:
         off_coords = [(dx,dy,dz) for dx in (-2,-1,0,1,2) for dy in (-2,-1,0,1,2) for dz in (-2,-1,0,1,2)]
-    # off_coords = [(0,1,-1)]
-    # for i in range(len(off_coords)):
-        # print(f"Offset {i}: {off_coords[i]}")
+
     ####################### Phase 1 Mapping #######################
     
     # Phase 1: Sort and deduplicate input coordinates
@@ -84,28 +61,7 @@ if __name__ == '__main__':
     )
     
     curr_phase = None
-    
-    # Print debug information
-    if debug:
-        print('\nSorted Source Array (Coordinate, Original Index):')
-        for idxc_item in uniq_coords: # Renamed idxc_item to idxc_item
-            coord = idxc_item.coord # Renamed coord_obj to coord
-            print(f"  key={hex(coord.to_key())}, coords=({coord.x}, {coord.y}, {coord.z}), index={idxc_item.orig_idx}")
-            
-        print('\nQuery Segments:')
-        for off_idx in range(len(off_coords)):
-            segment = [qry_keys[i] for i in range(len(qry_keys)) 
-                       if qry_off_idx[i] == off_idx]
-            # segment contains IndexedCoord objects where .coord is now a Coord3D object
-            # To print the (x,y,z) of these query coordinates:
-            print(f"  Offset {off_coords[off_idx]}: {[(idxc.coord.x, idxc.coord.y, idxc.coord.z) for idxc in segment]}") # Renamed ic to idxc
-
-    if debug:
-        print('\nKernel Map:')
-        for off_idx, matches in kmap.items():
-            print(f"  Offset {off_coords[off_idx]}: {matches}")
-    
-    
+        
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -117,19 +73,12 @@ if __name__ == '__main__':
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
 
-    # No need to sort kmap as it's already a SortedByValueLengthDict
-    # Sparse list of offsets with matches
-    # For some reason cache is not none even if we don't use it
-    # So invalidate it first.
     kmap._invalidate_cache()
     kmap._get_sorted_keys()
     offsets_active = list(kmap._get_sorted_keys())
     # Number of slots required by each offset
     slot_array = [len(kmap[off_idx]) for off_idx in offsets_active]
     
-    if debug:
-        print("Offsets sorted by matches count:", offsets_active)
-        print("Slot array:", slot_array)
 
     # Perform greedy grouping and padding.
     from minuet_gather import greedy_group
@@ -157,15 +106,6 @@ if __name__ == '__main__':
     gemm_buffer = np.zeros(total_slots*TOTAL_FEATS_PT, dtype=np.uint16)
    
     
-    if debug:
-        print("Groups metadata ([start, end], base, req, alloc):")
-        for g in groups:
-            print(g)    
-        print("GEMM List:")
-        for g in gemm_list:
-            print(g)
-
-
     from minuet_gather import mt_gather
     mt_gather(
         num_threads=1,  # Updated parameter name
