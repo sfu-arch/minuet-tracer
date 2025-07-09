@@ -6,6 +6,18 @@ import os
 from pathlib import Path
 import numpy as np
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
+
+
+def load_simbin_files(input_path):
+    input_path = Path(input_path).resolve()
+    if input_path.is_file() and input_path.suffix == '.simbin':
+        return [input_path]
+    elif input_path.is_dir():
+        return sorted([f for f in input_path.glob("*.simbin")])
+    else:
+        raise ValueError(f"Invalid input path: {input_path}")
 
 
 def sample_dataset():
@@ -16,8 +28,7 @@ def sample_dataset():
     return dest_path
 
 
-def load_and_visualize_sample(dest_path):
-    sample_path = (dest_path / '000000.simbin').resolve()
+def load_and_visualize_sample(sample_path):
     in_coords, features = read_simbin(sample_path)
     visualize_point_cloud(in_coords)
     return in_coords
@@ -67,11 +78,8 @@ def debug_mapping(uniq_coords, qry_keys, qry_off_idx, kmap, off_coords):
 
 
 def write_mapping_results(kmap, off_coords, output_dir):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    map_trace_checksum = write_gmem_trace(output_dir + 'map_trace.bin.gz')
-    write_kernel_map_to_gz(kmap, output_dir + 'kernel_map.bin.gz', off_coords)
+    map_trace_checksum = write_gmem_trace(output_dir + '/map_trace.bin.gz')
+    write_kernel_map_to_gz(kmap, output_dir + '/kernel_map.bin.gz', off_coords)
     return map_trace_checksum
 
 
@@ -85,12 +93,13 @@ def generate_gather_metadata(kmap, off_coords, uniq_coords, output_dir):
         print("Offsets sorted by matches count:", offsets_active)
         print("Slot array:", slot_array)
 
-    slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
+    slot_indices, groups, membership, gemm_list, total_slots = greedy_group(
         slot_array,
         alignment=GEMM_ALIGNMENT,
         max_group=GEMM_WT_GROUP,
         max_slots=GEMM_SIZE,
     )
+    gemm_checksum = write_gemm_list(gemm_list, output_dir + '/gemms.bin.gz')
 
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
@@ -98,7 +107,7 @@ def generate_gather_metadata(kmap, off_coords, uniq_coords, output_dir):
     metadata_checksum = write_metadata(
         out_mask, in_mask, slot_dict, slot_array,
         len(off_coords), len(uniq_coords), total_slots,
-        filename=output_dir + 'metadata.bin.gz'
+        filename=output_dir + '/metadata.bin.gz'
     )
 
     return out_mask, in_mask, total_slots, gemm_checksum, metadata_checksum, slot_dict, groups, gemm_list
@@ -126,7 +135,7 @@ def run_gather_and_scatter(out_mask, in_mask, uniq_coords, off_coords, total_slo
         sources=None,
         gemm_buffers=gemm_buffer
     )
-    gather_checksum = write_gmem_trace(output_dir + 'gather_trace.bin.gz', sizeof_addr=8)
+    gather_checksum = write_gmem_trace(output_dir + '/gather_trace.bin.gz', sizeof_addr=8)
 
     mt_scatter(
         num_threads=2,
@@ -139,7 +148,7 @@ def run_gather_and_scatter(out_mask, in_mask, uniq_coords, off_coords, total_slo
         gemm_buffers=None,
         outputs=None
     )
-    scatter_checksum = write_gmem_trace(output_dir + 'scatter_trace.bin.gz', sizeof_addr=8)
+    scatter_checksum = write_gmem_trace(output_dir + '/scatter_trace.bin.gz', sizeof_addr=8)
 
     return gather_checksum, scatter_checksum
 
@@ -152,30 +161,64 @@ def write_checksums(map_trace_checksum, metadata_checksum, gemm_checksum, gather
         "gather_trace.bin.gz": gather_checksum,
         "scatter_trace.bin.gz": scatter_checksum,
     }
-    with open(output_dir + 'checksums.json', 'w') as f:
+    with open(output_dir + '/checksums.json', 'w') as f:
         json.dump(checksums, f, indent=2)
+
+
+
+def process_simbin_file(sample_path, out_dir_path, stride, off_coords):
+    print(f"\nProcessing {simbin_file.name}...")
+
+    if not os.path.exists(out_dir_path):
+        os.makedirs(out_dir_path)
+
+    in_coords = load_and_visualize_sample(sample_path)
+
+    uniq_coords, qry_keys, qry_in_idx, qry_off_idx, kmap = run_mapping_phase(in_coords, stride, off_coords)
+
+    debug_mapping(uniq_coords, qry_keys, qry_off_idx, kmap, off_coords)
+
+    map_trace_checksum = write_mapping_results(kmap, off_coords, out_dir_path)
+
+    out_mask, in_mask, total_slots, gemm_checksum, metadata_checksum, slot_dict, groups, gemm_list = generate_gather_metadata(
+        kmap, off_coords, uniq_coords, out_dir_path
+    )
+
+    gather_checksum, scatter_checksum = run_gather_and_scatter(
+        out_mask, in_mask, uniq_coords, off_coords, total_slots, out_dir_path, groups, gemm_list
+    )
+
+    write_checksums(map_trace_checksum, metadata_checksum, gemm_checksum, gather_checksum, scatter_checksum, out_dir_path)
+
+    print(f"Finished processing {simbin_file.name}")
 
 
 if __name__ == '__main__':
     global phase
     stride = 1
     off_coords = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+    script_dir = Path(__file__).parent.resolve()
+    # data_sizes = ['small', 'medium', 'large']
+    data_sizes = ['medium', 'large']
 
-    dest_path = sample_dataset()
-    in_coords = load_and_visualize_sample(dest_path)
+    tasks = []
+    with ProcessPoolExecutor(max_workers=8) as executor:
+        for data_size in data_sizes:
+            input_dir = (script_dir / 'examples' / data_size).resolve()
 
-    uniq_coords, qry_keys, qry_in_idx, qry_off_idx, kmap = run_mapping_phase(in_coords, stride, off_coords)
+            simbin_files = load_simbin_files(input_dir)
+            for simbin_file in simbin_files:
+                print(f"\nProcessing {simbin_file.name}...")
 
-    debug_mapping(uniq_coords, qry_keys, qry_off_idx, kmap, off_coords)
+                sample_path = (input_dir / simbin_file.name).resolve()
+                out_dir_path = os.path.join(minuet_config.output_dir, data_size, simbin_file.name.split('.')[0])
+                if not os.path.exists(out_dir_path):
+                    os.makedirs(out_dir_path)
 
-    map_trace_checksum = write_mapping_results(kmap, off_coords, output_dir)
+                tasks.append(executor.submit(process_simbin_file, sample_path, out_dir_path, stride, off_coords))
 
-    out_mask, in_mask, total_slots, gemm_checksum, metadata_checksum, slot_dict, groups, gemm_list = generate_gather_metadata(
-        kmap, off_coords, uniq_coords, output_dir
-    )
-
-    gather_checksum, scatter_checksum = run_gather_and_scatter(
-        out_mask, in_mask, uniq_coords, off_coords, total_slots, output_dir, groups, gemm_list
-    )
-
-    write_checksums(map_trace_checksum, metadata_checksum, gemm_checksum, gather_checksum, scatter_checksum, output_dir)
+        for future in as_completed(tasks):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error occurred: {e}")
