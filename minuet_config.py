@@ -7,7 +7,7 @@ debug = False
 output_dir = 'out/'
 
 # Number of virtual threads (general)
-NUM_THREADS = 4
+NUM_THREADS = 8
 SIZE_KEY = 4
 SIZE_INT = 4
 SIZE_WEIGHT = 4
@@ -35,29 +35,33 @@ GEMM_SIZE = 4
 NUM_TILES_GATHER = 4  # Renamed from NUM_TILES to distinguish if needed, maps to JSON NUM_TILES
 TILE_FEATS_GATHER = 16 # Renamed from TILE_FEATS, maps to JSON TILE_FEATS
 BULK_FEATS_GATHER = 4  # Renamed from BULK_FEATS, maps to JSON BULK_FEATS
-N_THREADS_GATHER = 1   # This is the gather-specific thread count
+N_THREADS_GATHER = 128   # This is the gather-specific thread count
 TOTAL_FEATS_PT = NUM_TILES_GATHER * TILE_FEATS_GATHER # Default calculation
 
 # New parameter from C++ config
 NUM_PIVOTS = 2 # Default value
 
 def get_config(_config_path):
-    global debug, output_dir, NUM_THREADS, SIZE_KEY, SIZE_INT, SIZE_WEIGHT
-    global I_BASE, TILE_BASE, QK_BASE, QI_BASE, QO_BASE, PIV_BASE, KM_BASE, WO_BASE, IV_BASE, WV_BASE
+    global debug, output_dir, NUM_THREADS, SIZE_KEY, SIZE_INT, SIZE_WEIGHT, SIZE_FEAT
+    global I_BASE, TILE_BASE, QK_BASE, QI_BASE, QO_BASE, PIV_BASE, KM_BASE, WO_BASE, IV_BASE, GM_BASE, WV_BASE
     global GEMM_ALIGNMENT, GEMM_WT_GROUP, GEMM_SIZE
     global NUM_TILES_GATHER, TILE_FEATS_GATHER, BULK_FEATS_GATHER, N_THREADS_GATHER, TOTAL_FEATS_PT_GATHER
-    global NUM_PIVOTS
-    global TOTAL_FEATS_PT
+    global NUM_PIVOTS, TOTAL_FEATS_PT
+    global NUM_TILES, TILE_FEATS, BULK_FEATS, N_THREADS, mem_trace
+    
     try:
         with open(_config_path, 'r') as f:
             _config_data = json.load(f)
         print(f"Successfully loaded configuration from {_config_path}")
     except FileNotFoundError:
         print(f"Warning: Configuration file '{_config_path}' not found. Using default values.")
+        _config_data = {}
     except json.JSONDecodeError:
         print(f"Warning: Error decoding JSON from '{_config_path}'. Using default values.")
+        _config_data = {}
     except Exception as e:
         print(f"Warning: An unexpected error occurred while loading configuration: {e}. Using default values.")
+        _config_data = {}
 
     # Helper for hex string to int conversion
     def _hex_to_int(value, default_val):
@@ -79,6 +83,7 @@ def get_config(_config_path):
     SIZE_KEY = _config_data.get("SIZE_KEY", SIZE_KEY)
     SIZE_INT = _config_data.get("SIZE_INT", SIZE_INT)
     SIZE_WEIGHT = _config_data.get("SIZE_WEIGHT", SIZE_WEIGHT)
+    SIZE_FEAT = _config_data.get("SIZE_FEAT", SIZE_FEAT)
 
     I_BASE = _hex_to_int(_config_data.get("I_BASE"), I_BASE)
     TILE_BASE = I_BASE  # Maintain alias
@@ -89,6 +94,7 @@ def get_config(_config_path):
     KM_BASE = _hex_to_int(_config_data.get("KM_BASE"), KM_BASE)
     WO_BASE = _hex_to_int(_config_data.get("WO_BASE"), WO_BASE)
     IV_BASE = _hex_to_int(_config_data.get("IV_BASE"), IV_BASE)
+    GM_BASE = _hex_to_int(_config_data.get("GM_BASE"), GM_BASE)
     WV_BASE = _hex_to_int(_config_data.get("WV_BASE"), WV_BASE)
 
     GEMM_ALIGNMENT = _config_data.get("GEMM_ALIGNMENT", GEMM_ALIGNMENT)
@@ -113,6 +119,56 @@ def get_config(_config_path):
     BULK_FEATS = BULK_FEATS_GATHER
     N_THREADS = N_THREADS_GATHER # For gather simulation if it uses N_THREADS
     TOTAL_FEATS_PT = TOTAL_FEATS_PT_GATHER
+    
+    print(f"Configuration updated - NUM_THREADS: {NUM_THREADS}, GEMM_SIZE: {GEMM_SIZE}, Output Dir: {output_dir}")
+
+def reload_config(config_path=None):
+    """
+    Reload configuration from file and update global variables.
+    
+    Args:
+        config_path (str, optional): Path to configuration file. 
+                                   Defaults to 'config.json' if None.
+    """
+    if config_path is None:
+        config_path = 'config.json'
+    
+    print(f"\n=== Reloading Configuration from {config_path} ===")
+    
+    # Store old values for comparison
+    old_num_threads = NUM_THREADS
+    old_gemm_size = GEMM_SIZE
+    old_output_dir = output_dir
+    
+    # Reload configuration
+    get_config(config_path)
+    
+    # Show what changed
+    if old_num_threads != NUM_THREADS:
+        print(f"NUM_THREADS: {old_num_threads} -> {NUM_THREADS}")
+    if old_gemm_size != GEMM_SIZE:
+        print(f"GEMM_SIZE: {old_gemm_size} -> {GEMM_SIZE}")
+    if old_output_dir != output_dir:
+        print(f"Output Directory: {old_output_dir} -> {output_dir}")
+    
+    print("=== Configuration Reload Complete ===\n")
+
+def print_current_config():
+    """Print current configuration values for debugging."""
+    print(f"\n=== Current Configuration Values ===")
+    print(f"NUM_THREADS: {NUM_THREADS}")
+    print(f"GEMM_SIZE: {GEMM_SIZE}")
+    print(f"GEMM_ALIGNMENT: {GEMM_ALIGNMENT}")
+    print(f"GEMM_WT_GROUP: {GEMM_WT_GROUP}")
+    print(f"NUM_PIVOTS: {NUM_PIVOTS}")
+    print(f"Output Directory: {output_dir}")
+    print(f"Debug Mode: {debug}")
+    print(f"NUM_TILES_GATHER: {NUM_TILES_GATHER}")
+    print(f"TILE_FEATS_GATHER: {TILE_FEATS_GATHER}")
+    print(f"BULK_FEATS_GATHER: {BULK_FEATS_GATHER}")
+    print(f"N_THREADS_GATHER: {N_THREADS_GATHER}")
+    print(f"TOTAL_FEATS_PT: {TOTAL_FEATS_PT}")
+    print("=====================================\n")
 
 # Clean up temporary variables from global namespace (optional)
 # These are prefixed with _ so they are less likely to cause issues if not deleted.

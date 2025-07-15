@@ -1,6 +1,6 @@
 from minuet_mapping import *
 from minuet_gather import *
-from minuet_config import *
+import minuet_config 
 from read_pcl import *
 import os
 import argparse
@@ -12,14 +12,22 @@ if __name__ == '__main__':
     # Input data
     
     in_coords = []
+    # This is ugly but what the hell
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
     parser.add_argument('--pcl-file', type=str, required=True, help="Path to the point cloud file")
     parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping")
-    parser.add_argument('--config', type=str, default='minuet_config.py', help="Path to the Minuet configuration file", required=True)
+    parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
+    minuet_config.get_config(args.config)
+    
+    # Show that configuration has been loaded
+    print(f"Configuration loaded from {args.config}")
+    print(f"NUM_THREADS: {minuet_config.NUM_THREADS}")
+    print(f"GEMM_SIZE: {minuet_config.GEMM_SIZE}")
+    print(f"Output directory: {minuet_config.output_dir}")
     
     # Load configuration
-    get_config(args.config)
+    
     
     
     if args.pcl_file:
@@ -35,7 +43,7 @@ if __name__ == '__main__':
     ####################### Phase 1 Mapping #######################
     
     # Phase 1: Sort and deduplicate input coordinates
-    print(f"\n--- Phase: {curr_phase} with {NUM_THREADS} threads ---")
+    print(f"\n--- Phase: {curr_phase} with {minuet_config.NUM_THREADS} threads ---")
     uniq_coords = compute_unique_sorted_coords(in_coords, stride)
 
     # Phase 2: Build query data structures
@@ -51,7 +59,7 @@ if __name__ == '__main__':
 
     # Phase 4: Create tiles and pivots for lookup optimization
     print('--- Phase: Make Tiles & Pivots ---')
-    coord_tiles, pivs = create_tiles_and_pivots(uniq_coords, NUM_PIVOTS) # Renamed c_tiles to coord_tiles
+    coord_tiles, pivs = create_tiles_and_pivots(uniq_coords, minuet_config.NUM_PIVOTS) # Renamed c_tiles to coord_tiles
     
     # Phase 5: Perform coordinate lookup
     print('--- Phase: Lookup ---')
@@ -63,12 +71,12 @@ if __name__ == '__main__':
     curr_phase = None
         
     # Create output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    if not os.path.exists(minuet_config.output_dir):
+        os.makedirs(minuet_config.output_dir)
     
     
-    map_trace_checksum = write_gmem_trace(output_dir+'map_trace.bin.gz')
-    write_kernel_map_to_gz(kmap, output_dir+'kernel_map.bin.gz', off_coords)
+    map_trace_checksum = write_gmem_trace(minuet_config.output_dir+'map_trace.bin.gz')
+    write_kernel_map_to_gz(kmap, minuet_config.output_dir+'kernel_map.bin.gz', off_coords)
 
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
@@ -84,9 +92,9 @@ if __name__ == '__main__':
     from minuet_gather import greedy_group
     slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
         slot_array,
-        alignment=GEMM_ALIGNMENT,
-        max_group=GEMM_WT_GROUP,
-        max_slots=GEMM_SIZE,
+        alignment=minuet_config.GEMM_ALIGNMENT,
+        max_group=minuet_config.GEMM_WT_GROUP,
+        max_slots=minuet_config.GEMM_SIZE,
     )
     
     # Dictionary with offsets active and position in global buffer.
@@ -96,19 +104,19 @@ if __name__ == '__main__':
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
 
     # Write metadata to file
-    metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=output_dir+'metadata.bin.gz')
+    metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=minuet_config.output_dir+'metadata.bin.gz')
 
     ############## Phase 3: Gather/Scatter Simulation ##############
 
 
     # Calculate buffer from slot_dict and slot_array
     print(f"Buffer size: {total_slots}")
-    gemm_buffer = np.zeros(total_slots*TOTAL_FEATS_PT, dtype=np.uint16)
+    gemm_buffer = np.zeros(total_slots*minuet_config.TOTAL_FEATS_PT, dtype=np.uint16)
    
     
     from minuet_gather import mt_gather
     mt_gather(
-        num_threads=1,  # Updated parameter name
+        num_threads=minuet_config.N_THREADS_GATHER,  # Updated parameter name
         num_points=len(uniq_coords),
         num_offsets = len(off_coords),
         num_tiles_per_pt=minuet_config.NUM_TILES_GATHER,
@@ -120,11 +128,11 @@ if __name__ == '__main__':
     )
     
     
-    gather_checksum = write_gmem_trace(output_dir+'gather_trace.bin.gz', sizeof_addr=8)
+    gather_checksum = write_gmem_trace(minuet_config.output_dir+'gather_trace.bin.gz', sizeof_addr=8)
     
     from minuet_gather import mt_gather
     mt_scatter(
-        num_threads=2,  # Updated parameter name
+        num_threads=minuet_config.N_THREADS_GATHER,  # Updated parameter name
         num_points=len(uniq_coords),
         num_offsets = len(off_coords),
         num_tiles_per_pt=minuet_config.NUM_TILES_GATHER,
@@ -135,7 +143,7 @@ if __name__ == '__main__':
         outputs=None
         )
     
-    scatter_checksum = write_gmem_trace(output_dir+'scatter_trace.bin.gz', sizeof_addr=8)
+    scatter_checksum = write_gmem_trace(minuet_config.output_dir+'scatter_trace.bin.gz', sizeof_addr=8)
 
     # Write all checksums to file as json
     checksums = {
@@ -147,7 +155,7 @@ if __name__ == '__main__':
     }
     
     import json    
-    with open(output_dir+'checksums.json', 'w') as f:
+    with open(minuet_config.output_dir+'checksums.json', 'w') as f:
         json.dump(checksums, f, indent=2)
 
  
