@@ -385,10 +385,8 @@ def greedy_group(slots, alignment=4, max_group=6, max_slots=None):
         })
             
     pprint(gemm_list)
-    # Write out the gemm list to file.
-    checksum = write_gemm_list(gemm_list)
 
-    return pos_indices, groups, membership, gemm_list, total_slots, checksum
+    return pos_indices, groups, membership, gemm_list, total_slots
 
 
 def write_gemm_list(gemm_data_list, filename = minuet_config.output_dir+"gemms.bin.gz"):
@@ -412,6 +410,7 @@ def write_gemm_list(gemm_data_list, filename = minuet_config.output_dir+"gemms.b
                                         gemm_M, 
                                         padding)
             f.write(packed_header)
+
     checksum = file_checksum(filename)
     return checksum
 

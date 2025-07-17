@@ -90,12 +90,13 @@ if __name__ == '__main__':
 
     # Perform greedy grouping and padding.
     from minuet_gather import greedy_group
-    slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
+    slot_indices, groups, membership, gemm_list, total_slots = greedy_group(
         slot_array,
         alignment=minuet_config.GEMM_ALIGNMENT,
         max_group=minuet_config.GEMM_WT_GROUP,
         max_slots=minuet_config.GEMM_SIZE,
     )
+    gemm_checksum = write_gemm_list(gemm_list, minuet_config.output_dir + 'gemms.bin.gz')
     
     # Dictionary with offsets active and position in global buffer.
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
