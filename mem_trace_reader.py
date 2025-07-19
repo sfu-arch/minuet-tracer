@@ -7,7 +7,40 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter, defaultdict
-from minuet_mapping import PHASES, OPS, TENSORS
+from minuet_mapping import bidict
+
+PHASES = bidict({
+    'RDX': 0,
+    'QRY': 1,
+    'SRT': 2,
+    'PVT': 3,
+    'LKP': 4,
+    'GTH': 5,
+    'SCT': 6,
+    'OCTREE_BUILD': 7,    # New phase for octree construction
+    'BALL_QUERY': 8       # New phase for ball query operations
+})
+TENSORS = bidict({
+    'I': 0,
+    'QK': 1,
+    'QI': 2,
+    'QO': 3,
+    'PIV': 4,
+    'KM': 5,
+    'WC': 6,
+    'TILE': 7,
+    'IV': 8,
+    'GM': 9,
+    'WV': 10,
+    'OCTREE_NODES': 11,   # New tensor for octree node data
+    'OCTREE_INDICES': 12, # New tensor for octree point indices
+    'BALL_RESULTS': 13    # New tensor for ball query results
+})
+
+OPS = bidict({
+    'R': 0,
+    'W': 1
+})
 
 def read_trace(filename,sizeof_addr=4):
     """Read a compressed memory trace file and return the entries."""

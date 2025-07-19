@@ -69,6 +69,50 @@ class Coord3D:
         return Coord3D(self.x + other.x, self.y + other.y, self.z + other.z)
 
 
+
+
+# ── Simple Coord3D Implementation (stub for missing import) ──
+class Coord3Df:
+    """Simple 3D coordinate class"""
+    def __init__(self, x: float, y: float, z: float):
+        self.x = x
+        self.y = y  
+        self.z = z
+    
+    def to_key(self) -> int:
+        """Convert to packed 32-bit key"""
+        return pack32(self.x, self.y, self.z)
+    
+    @classmethod
+    def from_key(cls, key: int) -> 'Coord3D':
+        """Create from packed key"""
+        x, y, z = unpack32s(key)
+        return cls(float(x), float(y), float(z))
+    
+    def quantized(self, stride: float) -> 'Coord3D':
+        """Return quantized version"""
+        return Coord3D(
+            round(self.x / stride) * stride,
+            round(self.y / stride) * stride, 
+            round(self.z / stride) * stride
+        )
+
+def pack32f(x, y, z) -> int:
+    """Pack three 10-bit values into 32-bit integer"""
+    # Convert to integers if they're floats
+    x_int = int(x) if isinstance(x, float) else x
+    y_int = int(y) if isinstance(y, float) else y
+    z_int = int(z) if isinstance(z, float) else z
+    return ((x_int & 0x3FF) << 20) | ((y_int & 0x3FF) << 10) | (z_int & 0x3FF)
+
+
+
+
+
+
+
+
+
 # Assumes that write and read phases are completely separate.
 # Concurrent mask index.
 class mask_index:

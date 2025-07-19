@@ -32,6 +32,9 @@ cd c++; cmake -B build; cd build; make
 ```bash
 # Main runs. Support for kernels from 3x3x3 to 7x7x7
 python3 main_minuet.py --pcl-file ./examples/000000.bin --kernel 3 --config ./config.json
+# For Ball query and Octree run as such.
+python3 main_bq.py --pcl-file ./examples/000000.bin --config ./bq_config.json --output-dir bq_out
+
 # For c++ version, first convert to simbin file
 python3 read_pcl.py --file examples/000000.bin --write-simbin
 # Assume you have already built the c++ version
@@ -115,6 +118,19 @@ I: Input, QK: Query Keys, PIV: Pivot Keys, KM: Kernel Map, IV: Input Feature Vec
 - `GEMM_ALIGNMENT`: Target matrix size for GEMM; number of inputs fused, `GEMM_WT_GROUP`: Max number of weights per group (break out condition for groups)
 
 
+### Additional Parameters for Ball Query Phase
+
+| Parameter | Default Value | Description |
+|-----------|---------------|-------------|
+| `DEFAULT_RADIUS` | 1.5 | Search radius for ball query operations to find neighboring points |
+| `MAX_NEIGHBORHOOD` | 16 | Maximum number of neighbor points to return per ball query |
+| `OCTREE_DEPTH` | 8 | Maximum depth of the octree spatial data structure for accelerated search |
+| `OCTREE_PTS_PER_NODE` | 128 | Maximum number of points stored in each octree leaf node |
+| `DEFAULT_STRIDE` | 1.0 | Grid stride for coordinate quantization and discrete offset calculations |
+| `N_THREADS_GATHER` | 128 | Number of threads used for parallel gather operations |
+| `TOTAL_FEATS_PT` | 64 | Total features per point (NUM_TILES_GATHER × TILE_FEATS_GATHER) |
+| `MAX_OCTREE_NODES` | 32768 | Memory limit in nodes. |
+| `MAX_OCTREE_INDICES` | 32768 | Memory limit in indices |
 
 
 
