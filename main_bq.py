@@ -25,6 +25,7 @@ def main():
     # Load configuration
     print(f"Loading configuration from: {args.config}")
     bq_config.get_config(args.config)
+    bq_config.output_dir += "/bq/"
     
     # Override config with command line arguments if provided
     if args.output_dir is not None:
@@ -72,7 +73,7 @@ def main():
 
     # Write ball query memory traces first
     print("Writing ball query memory traces...")
-    map_checksum = write_gmem_trace(bq_config.output_dir + "/bq_map_trace.bin.gz", sizeof_addr=8)
+    map_checksum = write_gmem_trace(bq_config.output_dir + "/map_trace.bin.gz", sizeof_addr=8)
     
     # ── Inverted Gather Operations ──
     print("Performing inverted gather operations...")
@@ -125,7 +126,7 @@ def main():
     
     # Write gather memory traces
     print("Writing gather memory traces...")
-    gather_checksum = write_gmem_trace(bq_config.output_dir + "/bq_gather_trace.bin.gz", sizeof_addr=8)
+    gather_checksum = write_gmem_trace(bq_config.output_dir + "/gather_trace.bin.gz", sizeof_addr=8)
     
     # Write gather buffer to disk
     # print("Writing gather buffer...")
@@ -138,7 +139,7 @@ def main():
     
     # Write ball query results
     print("Writing ball query results...")
-    write_ball_query_results_to_gz(query_results, bq_config.output_dir + "/bq_kmap.gz")
+    write_ball_query_results_to_gz(query_results, bq_config.output_dir + "/kmap.gz")
     
 
     # Generate GEMM information based on gather results
@@ -149,7 +150,7 @@ def main():
         'padding': slots_per_query - max_neighbors if max_neighbors > 0 else 0  # Padding per query
     }]
     
-    gemm_checksum = write_gemm_list(gemm_data, bq_config.output_dir + "/bq_gemms.bin.gz")
+    gemm_checksum = write_gemm_list(gemm_data, bq_config.output_dir + "/gemms.bin.gz")
     
     # Generate comprehensive statistics
     print("Generating statistics...")

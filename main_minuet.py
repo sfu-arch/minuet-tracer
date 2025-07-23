@@ -19,6 +19,8 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
     minuet_config.get_config(args.config)
+
+    minuet_config.output_dir += "/minuet/"
     
     # Show that configuration has been loaded
     print(f"Configuration loaded from {args.config}")
