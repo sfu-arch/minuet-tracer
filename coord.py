@@ -8,9 +8,9 @@ from typing import Sequence, Any, Mapping
 # ── Helper: pack/unpack 32-bit keys ──
 def pack32(*coords):
     key = 0
-    key = coords[2] & 0x3FF
-    key = (key << 10) | coords[1] & 0x3FF
-    key = (key << 10) | coords[0] & 0x3FF
+    key = int(coords[2]) & 0x3FF
+    key = (key << 10) | int(coords[1]) & 0x3FF
+    key = (key << 10) | int(coords[0]) & 0x3FF
     return key
 
     # for c in coords:

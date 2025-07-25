@@ -15,7 +15,7 @@ if __name__ == '__main__':
     in_coords = []
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
     parser.add_argument('--pcl-file', type=str)
-    parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping",default=3)
+    parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping")
     args = parser.parse_args()
     if args.pcl_file:
         in_coords, _ = read_point_cloud(args.pcl_file)
@@ -109,7 +109,7 @@ if __name__ == '__main__':
 
     # Perform greedy grouping and padding.
     from minuet_gather import greedy_group
-    slot_indices, groups, membership, gemm_list, total_slots, gemm_checksum = greedy_group(
+    slot_indices, groups, membership, gemm_list, total_slots = greedy_group(
         slot_array,
         alignment=GEMM_ALIGNMENT,
         max_group=GEMM_WT_GROUP,
