@@ -271,9 +271,15 @@ class SqueezeSeg:
         total_macs += macs
         layer_details['conv14_prob'] = {'macs': macs, 'output_shape': current_shape}
         
+        # Calculate number of points (pixels in range image)
+        # For LiDAR, each pixel typically represents one point in the point cloud
+        num_points = self.input_shape[0] * self.input_shape[1]
+        
         return {
             'total_macs': total_macs,
             'total_macs_millions': total_macs / 1e6,
+            'macs_per_point': total_macs / num_points if num_points > 0 else 0,
+            'num_points': num_points,
             'layer_details': layer_details,
             'final_output_shape': current_shape,
             'sparsity_config': self.sparsity_config
@@ -439,9 +445,15 @@ class SalsaNext:
         total_macs += macs
         layer_details['logits'] = {'macs': macs, 'output_shape': current_shape}
         
+        # Calculate number of points (pixels in range image)
+        # For LiDAR, each pixel typically represents one point in the point cloud
+        num_points = self.input_shape[0] * self.input_shape[1]
+        
         return {
             'total_macs': total_macs,
             'total_macs_millions': total_macs / 1e6,
+            'macs_per_point': total_macs / num_points if num_points > 0 else 0,
+            'num_points': num_points,
             'layer_details': layer_details,
             'final_output_shape': current_shape,
             'sparsity_config': self.sparsity_config
@@ -736,9 +748,15 @@ class RangeNetPP:
         total_macs += final_macs
         layer_details['prediction_head'] = {'macs': final_macs, 'output_shape': current_shape}
         
+        # Calculate number of points (pixels in range image)
+        # For LiDAR, each pixel typically represents one point in the point cloud
+        num_points = self.input_shape[0] * self.input_shape[1]
+        
         return {
             'total_macs': total_macs,
             'total_macs_millions': total_macs / 1e6,
+            'macs_per_point': total_macs / num_points if num_points > 0 else 0,
+            'num_points': num_points,
             'layer_details': layer_details,
             'final_output_shape': current_shape,
             'sparsity_config': self.sparsity_config
@@ -916,6 +934,8 @@ def main():
             
             print(f"  Total MACs: {result['total_macs']:,}")
             print(f"  Total MACs (millions): {result['total_macs_millions']:.2f}M")
+            print(f"  MACs per point: {result['macs_per_point']:.2f}")
+            print(f"  Number of points: {result['num_points']:,}")
             print(f"  Final output shape: {result['final_output_shape']}")
         
         results[scenario_name] = scenario_results
@@ -926,8 +946,8 @@ def main():
     print("=" * 80)
     
     # Create comparison table
-    print(f"{'Network':<15} {'Scenario':<20} {'MACs (M)':<12} {'Speedup':<10} {'Reduction':<10}")
-    print("-" * 75)
+    print(f"{'Network':<15} {'Scenario':<20} {'MACs (M)':<12} {'MACs/Point':<12} {'Speedup':<10} {'Reduction':<10}")
+    print("-" * 87)
     
     dense_results = results['Dense (No Sparsity)']
     
@@ -935,10 +955,11 @@ def main():
         for network_name, result in scenario_results.items():
             dense_macs = dense_results[network_name]['total_macs_millions']
             current_macs = result['total_macs_millions']
+            macs_per_point = result['macs_per_point']
             speedup = dense_macs / current_macs if current_macs > 0 else float('inf')
             reduction = (1 - current_macs / dense_macs) * 100 if dense_macs > 0 else 0
             
-            print(f"{network_name:<15} {scenario_name:<20} {current_macs:<12.2f} {speedup:<10.2f}x {reduction:<10.1f}%")
+            print(f"{network_name:<15} {scenario_name:<20} {current_macs:<12.2f} {macs_per_point:<12.2f} {speedup:<10.2f}x {reduction:<10.1f}%")
     
     # Summary statistics
     print("\n" + "=" * 80)
@@ -977,6 +998,37 @@ def main():
         sparse_macs = ultra_sparse_results[network_name]['total_macs_millions']
         max_speedup = dense_macs / sparse_macs
         print(f"{network_name:<15}: {max_speedup:.2f}x speedup ({dense_macs:.2f}M → {sparse_macs:.2f}M MACs)")
+    
+    # MACs per point comparison
+    print("\n" + "=" * 80)
+    print("MACS PER POINT ANALYSIS")
+    print("=" * 80)
+    
+    print(f"\nMACs per point for different networks (Dense configuration):")
+    print(f"{'Network':<15} {'Input Size':<15} {'Points':<10} {'MACs/Point':<12} {'Total MACs (M)':<15}")
+    print("-" * 70)
+    
+    for network_name in configs.keys():
+        config = configs[network_name]
+        result = dense_results[network_name]
+        input_size = f"{config['input_height']}x{config['input_width']}"
+        num_points = result['num_points']
+        macs_per_point = result['macs_per_point']
+        total_macs = result['total_macs_millions']
+        
+        print(f"{network_name:<15} {input_size:<15} {num_points:<10,} {macs_per_point:<12.2f} {total_macs:<15.2f}")
+    
+    print(f"\nImpact of sparsity on MACs per point:")
+    print(f"{'Network':<15} {'Dense':<12} {'Conservative':<12} {'Moderate':<12} {'Aggressive':<12}")
+    print("-" * 63)
+    
+    for network_name in configs.keys():
+        dense_mpp = dense_results[network_name]['macs_per_point']
+        conservative_mpp = results['Conservative Pruning'][network_name]['macs_per_point']
+        moderate_mpp = results['Moderate Pruning'][network_name]['macs_per_point']
+        aggressive_mpp = results['Aggressive Pruning'][network_name]['macs_per_point']
+        
+        print(f"{network_name:<15} {dense_mpp:<12.2f} {conservative_mpp:<12.2f} {moderate_mpp:<12.2f} {aggressive_mpp:<12.2f}")
 
 if __name__ == "__main__":
     main()
