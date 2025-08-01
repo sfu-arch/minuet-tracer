@@ -77,7 +77,7 @@ if __name__ == '__main__':
         os.makedirs(minuet_config.output_dir)
     
     
-    map_trace_checksum = write_gmem_trace(minuet_config.output_dir+'map_trace.bin.gz')
+    map_trace_checksum = write_gmem_trace(minuet_config.output_dir+'map_trace.bin.gz', sizeof_addr=8)
     write_kernel_map_to_gz(kmap, minuet_config.output_dir+'kernel_map.bin.gz', off_coords)
 
     
