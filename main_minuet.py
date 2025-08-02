@@ -16,12 +16,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
     parser.add_argument('--pcl-file', type=str, required=True, help="Path to the point cloud file")
     parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping")
+    parser.add_argument('--channel', type=int, default=16, help="Number of Channels")
+    parser.add_argument('--downsample-stride', type=int, default=1, help="Stride for downsample")
+    parser.add_argument('--conv-stride', type=int, default=1, help="Stride for convolution")
+    parser.add_argument('--output-dir', type=str, help="Output directory for traces")
     parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
     minuet_config.get_config(args.config)
 
-    minuet_config.output_dir += "/minuet/"
-    
+    # Updating configuration based on command line arguments
+    if args.output_dir:
+        minuet_config.output_dir = args.output_dir
+    if args.channel < 16:
+        minuet_config.TILE_FEATS_GATHER = args.channel
+    minuet_config.NUM_TILES_GATHER = args.channel // minuet_config.TILE_FEATS_GATHER
+
     # Show that configuration has been loaded
     print(f"Configuration loaded from {args.config}")
     print(f"NUM_THREADS: {minuet_config.NUM_THREADS}")
@@ -35,8 +44,8 @@ if __name__ == '__main__':
     if args.pcl_file:
         in_coords, _ = read_point_cloud(args.pcl_file)
         
-    stride = 1
-    off_coords = []
+    stride = args.downsample_stride
+    off_coords = [(0,0,0)]
     if args.kernel == 3:
         off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     elif args.kernel == 5:
