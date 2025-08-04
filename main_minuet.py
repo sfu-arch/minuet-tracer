@@ -85,9 +85,9 @@ if __name__ == '__main__':
     if not os.path.exists(minuet_config.output_dir):
         os.makedirs(minuet_config.output_dir)
     
-    
-    map_trace_checksum = write_gmem_trace(minuet_config.output_dir+'map_trace.bin.gz', sizeof_addr=8)
-    write_kernel_map_to_gz(kmap, minuet_config.output_dir+'kernel_map.bin.gz', off_coords)
+
+    map_trace_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'map_trace.bin.gz'), sizeof_addr=8)
+    write_kernel_map_to_gz(kmap, os.path.join(minuet_config.output_dir, 'kernel_map.bin.gz'), off_coords)
 
     
     ############## Phase 2: Gather/Scatter Metadata Generation ##############
@@ -107,8 +107,8 @@ if __name__ == '__main__':
         max_group=minuet_config.GEMM_WT_GROUP,
         max_slots=minuet_config.GEMM_SIZE,
     )
-    gemm_checksum = write_gemm_list(gemm_list, minuet_config.output_dir + 'gemms.bin.gz')
-    
+    gemm_checksum = write_gemm_list(gemm_list, os.path.join(minuet_config.output_dir, 'gemms.bin.gz'))
+
     # Dictionary with offsets active and position in global buffer.
     slot_dict = {offsets_active[i]: slot_indices[i] for i in range(len(slot_indices))}
 
@@ -116,7 +116,7 @@ if __name__ == '__main__':
     out_mask, in_mask = create_in_out_masks(kmap, slot_dict, len(off_coords), len(uniq_coords))
 
     # Write metadata to file
-    metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=minuet_config.output_dir+'metadata.bin.gz')
+    metadata_checksum = write_metadata(out_mask, in_mask, slot_dict, slot_array, len(off_coords), len(uniq_coords), total_slots, filename=os.path.join(minuet_config.output_dir, 'metadata.bin.gz'))
 
     ############## Phase 3: Gather/Scatter Simulation ##############
 
@@ -138,10 +138,10 @@ if __name__ == '__main__':
         sources=None,
         gemm_buffers= gemm_buffer
     )
-    
-    
-    gather_checksum = write_gmem_trace(minuet_config.output_dir+'gather_trace.bin.gz', sizeof_addr=8)
-    
+
+
+    gather_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'gather_trace.bin.gz'), sizeof_addr=8)
+
     from minuet_gather import mt_gather
     mt_scatter(
         num_threads=minuet_config.N_THREADS_GATHER,  # Updated parameter name
@@ -154,8 +154,8 @@ if __name__ == '__main__':
         gemm_buffers=None,
         outputs=None
         )
-    
-    scatter_checksum = write_gmem_trace(minuet_config.output_dir+'scatter_trace.bin.gz', sizeof_addr=8)
+
+    scatter_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'scatter_trace.bin.gz'), sizeof_addr=8)
 
     # Write all checksums to file as json
     checksums = {
@@ -167,7 +167,7 @@ if __name__ == '__main__':
     }
     
     import json    
-    with open(minuet_config.output_dir+'checksums.json', 'w') as f:
+    with open(os.path.join(minuet_config.output_dir, 'checksums.json'), 'w') as f:
         json.dump(checksums, f, indent=2)
 
  

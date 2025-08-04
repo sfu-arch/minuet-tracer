@@ -25,7 +25,6 @@ def main():
     # Load configuration
     print(f"Loading configuration from: {args.config}")
     bq_config.get_config(args.config)
-    bq_config.output_dir += "/bq/"
     
     # Override config with command line arguments if provided
     if args.output_dir is not None:
@@ -73,8 +72,8 @@ def main():
 
     # Write ball query memory traces first
     print("Writing ball query memory traces...")
-    map_checksum = write_gmem_trace(bq_config.output_dir + "/map_trace.bin.gz", sizeof_addr=8)
-    
+    map_checksum = write_gmem_trace(os.path.join(bq_config.output_dir, "map_trace.bin.gz"), sizeof_addr=8)
+
     # ── Inverted Gather Operations ──
     print("Performing inverted gather operations...")
     
@@ -126,11 +125,11 @@ def main():
     
     # Write gather memory traces
     print("Writing gather memory traces...")
-    gather_checksum = write_gmem_trace(bq_config.output_dir + "/gather_trace.bin.gz", sizeof_addr=8)
-    
+    gather_checksum = write_gmem_trace(os.path.join(bq_config.output_dir, "gather_trace.bin.gz"), sizeof_addr=8)
+
     # Write gather buffer to disk
     # print("Writing gather buffer...")
-    # gather_buffer_file = bq_config.output_dir + "/gather_buffer.bin"
+    # gather_buffer_file = os.path.join(bq_config.output_dir, "gather_buffer.bin")
     # with open(gather_buffer_file, 'wb') as f:
     #     # Convert to numpy array and save as binary
     #     buffer_array = np.array(gather_buffer, dtype=np.float32)
@@ -139,8 +138,8 @@ def main():
     
     # Write ball query results
     print("Writing ball query results...")
-    write_ball_query_results_to_gz(query_results, bq_config.output_dir + "/kmap.gz")
-    
+    write_ball_query_results_to_gz(query_results, os.path.join(bq_config.output_dir, "kmap.gz"))
+
 
     # Generate GEMM information based on gather results
     gemm_data = [{
@@ -149,9 +148,9 @@ def main():
         'gemm_N': slots_per_query,     # Max slots per query (power of 2)
         'padding': slots_per_query - max_neighbors if max_neighbors > 0 else 0  # Padding per query
     }]
-    
-    gemm_checksum = write_gemm_list(gemm_data, bq_config.output_dir + "/gemms.bin.gz")
-    
+
+    gemm_checksum = write_gemm_list(gemm_data, os.path.join(bq_config.output_dir, "gemms.bin.gz"))
+
     # Generate comprehensive statistics
     print("Generating statistics...")
     total_queries = len(query_results)
