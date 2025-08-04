@@ -22,25 +22,24 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir', type=str, help="Output directory for traces")
     parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
+
+    # Load configuration
     minuet_config.get_config(args.config)
 
     # Updating configuration based on command line arguments
     if args.output_dir:
         minuet_config.output_dir = args.output_dir
-    if args.channel < 16:
-        minuet_config.TILE_FEATS_GATHER = args.channel
-    minuet_config.NUM_TILES_GATHER = args.channel // minuet_config.TILE_FEATS_GATHER
+    minuet_config.NUM_TILES_GATHER = 1 + (args.channel - 1) // minuet_config.TILE_FEATS_GATHER
 
     # Show that configuration has been loaded
     print(f"Configuration loaded from {args.config}")
     print(f"NUM_THREADS: {minuet_config.NUM_THREADS}")
     print(f"GEMM_SIZE: {minuet_config.GEMM_SIZE}")
     print(f"Output directory: {minuet_config.output_dir}")
-    
-    # Load configuration
-    
-    
-    
+    print(f"Tiles feats gather: {minuet_config.TILE_FEATS_GATHER}")
+    print(f"Num tiles gather: {minuet_config.NUM_TILES_GATHER}")
+    print(f"channel: {args.channel}")
+
     if args.pcl_file:
         in_coords, _ = read_point_cloud(args.pcl_file)
         
