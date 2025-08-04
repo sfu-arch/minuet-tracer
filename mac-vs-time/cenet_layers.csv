@@ -1,0 +1,13 @@
+Layer name,IFMAP Height,IFMAP Width,Filter Height,Filter Width,Channels,Num Filter,Strides,Sparsity
+context_emb_conv1,64,2048,1,1,5,64,1,0.4
+context_emb_conv2,64,2048,3,3,5,64,1,0.4
+context_emb_conv3,64,2048,3,3,5,64,1,0.4
+context_emb_fusion,64,2048,1,1,192,128,1,0.4
+multiscale_1_conv1,64,2048,3,3,128,64,1,0.4
+multiscale_1_conv2,64,2048,3,3,64,64,1,0.4
+multiscale_2_conv1,32,1024,3,3,128,64,1,0.4
+multiscale_2_conv2,32,1024,3,3,64,64,1,0.4
+multiscale_4_conv1,16,512,3,3,128,64,1,0.4
+multiscale_4_conv2,16,512,3,3,64,64,1,0.4
+attention_fusion,64,2048,1,1,128,128,1,0.4
+prediction,64,2048,1,1,128,20,1,0.4

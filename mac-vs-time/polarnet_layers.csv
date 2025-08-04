@@ -1,0 +1,22 @@
+Layer name,IFMAP Height,IFMAP Width,Filter Height,Filter Width,Channels,Num Filter,Strides,Sparsity
+initial_conv,480,360,3,3,9,64,1,0.4
+resnet_l1_b1_conv1,480,360,3,3,64,64,1,0.4
+resnet_l1_b1_conv2,480,360,3,3,64,64,1,0.4
+resnet_l1_b2_conv1,480,360,3,3,64,64,1,0.4
+resnet_l1_b2_conv2,480,360,3,3,64,64,1,0.4
+resnet_l2_b1_conv1,240,180,3,3,64,128,2,0.4
+resnet_l2_b1_conv2,240,180,3,3,128,128,1,0.4
+resnet_l2_b2_conv1,240,180,3,3,128,128,1,0.4
+resnet_l2_b2_conv2,240,180,3,3,128,128,1,0.4
+resnet_l3_b1_conv1,120,90,3,3,128,256,2,0.4
+resnet_l3_b1_conv2,120,90,3,3,256,256,1,0.4
+resnet_l3_b2_conv1,120,90,3,3,256,256,1,0.4
+resnet_l3_b2_conv2,120,90,3,3,256,256,1,0.4
+resnet_l4_b1_conv1,60,45,3,3,256,512,2,0.4
+resnet_l4_b1_conv2,60,45,3,3,512,512,1,0.4
+resnet_l4_b2_conv1,60,45,3,3,512,512,1,0.4
+resnet_l4_b2_conv2,60,45,3,3,512,512,1,0.4
+fpn_level_1,120,90,3,3,512,256,1,0.4
+fpn_level_2,240,180,3,3,256,128,1,0.4
+fpn_level_3,480,360,3,3,128,64,1,0.4
+prediction_head,480,360,1,1,64,20,1,0.4
