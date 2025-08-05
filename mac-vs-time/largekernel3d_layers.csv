@@ -1,0 +1,10 @@
+Layer,MACs,Output_Points,Channels,Additional_Info
+stem,241919999,100000,64,{}
+large_kernel_stage_1,26880000000,100000,96,{'kernel_size': 5}
+large_kernel_stage_2,18439680000,12500,128,{'kernel_size': 7}
+large_kernel_stage_3,67199999999,12500,192,{'kernel_size': 9}
+large_kernel_stage_4,2098656214,1562,256,{'kernel_size': 7}
+decoder_1,13435699200,6248,192,{'kernel_size': 5}
+decoder_2,5804222054,24992,128,{'kernel_size': 3}
+decoder_3,7738962739,99968,64,{'kernel_size': 3}
+classification,44800000,100000,20,{}

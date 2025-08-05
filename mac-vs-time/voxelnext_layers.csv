@@ -1,0 +1,19 @@
+Layer,MACs,Output_Points,Channels,Additional_Info
+patchify,430080000,100000,48,{}
+stage_1_expand,161280000,100000,96,{}
+stage_1_block_1,2709503999,100000,96,"{'dw_macs': 129023999, 'mlp_macs': 2580480000}"
+stage_1_block_2,2709503999,100000,96,"{'dw_macs': 129023999, 'mlp_macs': 2580480000}"
+stage_2_expand,80640000,12500,192,{}
+stage_2_block_1,1354751999,12500,192,"{'dw_macs': 64511999, 'mlp_macs': 1290240000}"
+stage_2_block_2,1354751999,12500,192,"{'dw_macs': 64511999, 'mlp_macs': 1290240000}"
+stage_3_expand,40307097,1562,384,{}
+stage_3_block_1,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_3_block_2,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_3_block_3,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_3_block_4,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_3_block_5,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_3_block_6,677117950,1562,384,"{'dw_macs': 32204390, 'mlp_macs': 644913560}"
+stage_4_expand,20127744,195,768,{}
+stage_4_block_1,336907468,195,768,"{'dw_macs': 14863564, 'mlp_macs': 322043904}"
+stage_4_block_2,336907468,195,768,"{'dw_macs': 14863564, 'mlp_macs': 322043904}"
+classification,537600000,100000,20,{}

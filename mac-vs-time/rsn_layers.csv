@@ -1,0 +1,12 @@
+Layer,MACs,Output_Points,Channels,Additional_Info
+initial_features,120959999,100000,32,{}
+encoder_stage_1,250879999,12500,64,"{'main_macs': 241919999, 'residual_macs': 8960000}"
+encoder_stage_2,125399858,1562,128,"{'main_macs': 120921292, 'residual_macs': 4478566}"
+encoder_stage_3,24041472,195,256,"{'main_macs': 21805056, 'residual_macs': 2236416}"
+encoder_stage_4,2422209,24,512,"{'main_macs': 1321205, 'residual_macs': 1101004}"
+decoder_stage_1,89030000,192,256,"{'decoder_macs': 84557168, 'skip_macs': 4472832}"
+decoder_stage_2,484591205,1536,128,"{'decoder_macs': 475634073, 'skip_macs': 8957132}"
+decoder_stage_3,969188147,12288,64,"{'decoder_macs': 951268147, 'skip_macs': 17920000}"
+decoder_stage_4,1938376294,98304,32,"{'decoder_macs': 1902536294, 'skip_macs': 35840000}"
+range_fusion,71680000,100000,64,{}
+classification,44800000,100000,20,{}

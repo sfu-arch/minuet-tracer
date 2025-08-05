@@ -1,0 +1,11 @@
+Layer,MACs,Output_Points,Channels,Additional_Info
+stem_1,120959999,100000,32,{}
+stem_2,967679999,100000,32,{}
+spvnas_block_1,1451520000,100000,48,{}
+spvnas_block_2,362880000,12500,64,{}
+spvnas_block_3,967679999,12500,128,{}
+spvnas_block_4,483685171,1562,256,{}
+decoder_1,1934740684,6248,128,{}
+decoder_2,1934740684,24992,64,{}
+decoder_3,1934740684,99968,32,{}
+point_classification,22400000,100000,20,{}

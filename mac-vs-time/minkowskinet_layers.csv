@@ -1,0 +1,11 @@
+Layer,MACs,Output_Points,Channels,Additional_Info
+conv0,120959999,100000,32,{}
+encoder_stage_1,241919999,12500,64,{}
+encoder_stage_2,120921292,1562,128,{}
+encoder_stage_3,21805056,195,256,{}
+encoder_stage_4,1321205,24,512,{}
+decoder_stage_1,84557168,192,256,{}
+decoder_stage_2,475634073,1536,128,{}
+decoder_stage_3,951268147,12288,64,{}
+decoder_stage_4,1902536294,98304,32,{}
+classification,22400000,100000,20,{}
