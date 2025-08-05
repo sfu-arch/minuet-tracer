@@ -30,6 +30,79 @@ def write_simbin_file(file_path, coords, features=None):
                 f.write(struct.pack('f' * len(feat), *feat))
     return 
 
+def voxelize_points(points, min_bound, max_bound, voxel_size, offset):
+    """
+    Voxelize a list of 3D points within specified boundaries, applying an offset.
+
+    Parameters:
+    - points: numpy array of shape (N, 3) representing the 3D points (X, Y, Z).
+    - min_bound: numpy array of shape (3,) representing the minimum boundaries (min_x, min_y, min_z).
+    - max_bound: numpy array of shape (3,) representing the maximum boundaries (max_x, max_y, max_z).
+    - voxel_size: scalar or numpy array of shape (3,) representing the size of each voxel in meters.
+    - offset: numpy array of shape (3,) representing the offset to apply (offset_x, offset_y, offset_z).
+
+    Returns:
+    - voxels: numpy array of shape (M, 3) representing the set of the occupied voxels.
+    """
+    # Ensure inputs are numpy arrays
+    points = np.asarray(points)
+    min_bound = np.asarray(min_bound)
+    max_bound = np.asarray(max_bound)
+    voxel_size = np.asarray(voxel_size)
+    offset = np.asarray(offset)
+    
+    # Filter points within boundaries: min_bound < points < max_bound
+    mask = np.all(points > min_bound, axis=1) & np.all(points < max_bound, axis=1)
+    points_filtered = points[mask]
+    
+    # Shift points by subtracting the offset
+    p_shifted = points_filtered + offset
+    
+    # Compute voxel indices
+    voxel_indices = np.floor(p_shifted / voxel_size).astype(int)
+    
+    # Find unique voxel indices to remove duplicates (sorts inputs)
+    # unique_voxel_indices = np.unique(voxel_indices, axis=0)
+    # return unique_voxel_indices
+
+    # Deduplicate while preserving first occurrence
+    seen = set()
+    unique_voxels = []
+    for voxel in voxel_indices:
+        key = tuple(voxel)
+        if key not in seen:
+            seen.add(key)
+            unique_voxels.append(voxel)
+
+    return np.array(unique_voxels)
+
+def downsample_voxels(voxels, voxelization_stride):
+    """
+    Downsample a list of voxels by dividing coordinates by stride and deduplicating.
+
+    Parameters:
+    - voxels: numpy array of shape (M, 3) representing the voxel coordinates.
+    - voxelization_stride: integer representing the downsampling factor.
+
+    Returns:
+    - downsampled_voxels: numpy array of shape (K, 3) representing the downsampled voxels.
+    """
+    # Ensure inputs are numpy arrays
+    voxels = np.asarray(voxels)
+    
+    # Divide voxel coordinates by stride (using integer division)
+    downsampled = voxels // voxelization_stride
+    
+    # Deduplicate while preserving first occurrence (like in voxelize_points)
+    seen = set()
+    unique_voxels = []
+    for voxel in downsampled:
+        key = tuple(voxel)
+        if key not in seen:
+            seen.add(key)
+            unique_voxels.append(voxel)
+    
+    return np.array(unique_voxels).astype(int)
 
 def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True):
     """
@@ -88,6 +161,20 @@ def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True)
             data = np.fromfile(file_path, dtype=np.float32)
             points = data.reshape(-1, 4)[:, :3]  # X,Y,Z (drop intensity)
             features = data.reshape(-1, 4)[:, 3:]  # Intensity as feature
+
+            min_bound = np.array([-50.0, -50.0, -5.0])
+            max_bound = np.array([50.0, 50.0, 3.0])
+            voxel_size = 0.05  # Scalar, same size for all dimensions
+            offset = np.array([50.0, 50.0, 5.0])
+            voxelized_points = voxelize_points(points, min_bound, max_bound, voxel_size, offset)
+
+            if (stride == None):
+                stride = 1
+            voxelized_points = downsample_voxels(voxelized_points, stride)
+            print(f"Loaded {len(voxelized_points)} points")
+
+            # we don't care about actual feature values
+            return voxelized_points, None
         
     elif extension == '.npy':
         # Handle NumPy format
