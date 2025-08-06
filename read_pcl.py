@@ -104,6 +104,79 @@ def downsample_voxels(voxels, voxelization_stride):
     
     return np.array(unique_voxels).astype(int)
 
+import numpy as np
+from typing import Set, Tuple
+
+def dilate_voxels_by_large_kernel_group_reduction(
+    voxels: np.ndarray,
+    kernel_size: int,
+    stride: int = 1
+) -> np.ndarray:
+    """
+    Dilates a set of voxels based on a group reduction rule using NumPy arrays.
+
+    For each stride-aligned voxel, it inspects a large kernel_size^3 volume,
+    partitioned into 27 groups. If a group's outer shell contains any voxels,
+    the corresponding adjacent voxel to the center is created if it doesn't exist.
+
+    Args:
+        voxels: A NumPy array of shape (N, 3) representing voxel coordinates.
+        kernel_size: The odd-valued size of the large inspection kernel.
+        stride: The alignment requirement for a voxel to be a kernel center.
+
+    Returns:
+        A new NumPy array of shape (M, 3) with the original and new voxels.
+    """
+    # A kernel size of 3 or less would do nothing with the improved logic,
+    # and it must be odd for a clear center.
+    assert kernel_size > 1 and kernel_size % 2 != 0, \
+        "kernel_size must be an odd integer greater than 1."
+    assert stride > 0, "stride must be positive."
+
+    # For efficient O(1) lookups, convert the NumPy array to a set of tuples.
+    # NumPy arrays are mutable and cannot be stored in a set directly.
+    voxels_set: Set[Tuple[int, int, int]] = {tuple(v) for v in voxels}
+
+    # Calculate the extent of the kernel from its center.
+    half_kernel = (kernel_size - 1) // 2
+
+    # A helper lambda to get the sign of a number (-1, 0, or 1).
+    sgn = lambda val: (val > 0) - (val < 0)
+
+    # Iterate through the original NumPy array rows to find kernel centers.
+    for center_voxel in voxels:
+        cx, cy, cz = center_voxel[0], center_voxel[1], center_voxel[2]
+        
+        # A voxel is a center only if its coordinates are aligned to the stride.
+        if cx % stride != 0 or cy % stride != 0 or cz % stride != 0:
+            continue
+
+        # 1. For this center, determine which of the 26 groups are populated.
+        populated_groups: Set[Tuple[int, int, int]] = set()
+
+        # Iterate through the large kernel_size^3 volume around the center.
+        for i in range(-half_kernel, half_kernel + 1):
+            for j in range(-half_kernel, half_kernel + 1):
+                for k in range(-half_kernel, half_kernel + 1):
+                    # Skip the 3x3x3 center of the large kernel.
+                    if abs(i) <= 1 and abs(j) <= 1 and abs(k) <= 1:
+                        continue
+                    
+                    check_pos = (cx + i, cy + j, cz + k)
+                    if check_pos in voxels_set:
+                        # This position has a voxel. Add its group index to the set.
+                        populated_groups.add((sgn(i), sgn(j), sgn(k)))
+
+        # 2. For each populated group, add the corresponding neighbor voxel to the set.
+        for group_idx in populated_groups:
+            gx, gy, gz = group_idx
+            neighbor_pos = (cx + gx, cy + gy, cz + gz)
+            voxels_set.add(neighbor_pos)
+            
+    print(f"Dialated {len(voxels)} voxels to {len(voxels_set)} voxels by group-reduced assignment")
+    # Convert the final set of tuples back to a NumPy array for the return value.
+    return np.array(list(voxels_set)).astype(int)
+
 def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True):
     """
     Read point cloud data from various formats and prepare for Minuet processing
@@ -487,5 +560,6 @@ if __name__ == "__main__":
         coords, features = read_point_cloud(args.file, args.stride, write_simbin=args.write_simbin)
     else:
         coords, features = read_point_cloud(args.file, write_simbin=args.write_simbin)
-    print(coords)
+    
+    coords = dilate_voxels_by_large_kernel_group_reduction(coords, 17)
     visualize_point_cloud(coords, features)
