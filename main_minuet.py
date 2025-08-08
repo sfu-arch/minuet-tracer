@@ -16,6 +16,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Minuet Mapping and Gathering Simulation")
     parser.add_argument('--pcl-file', type=str, required=True, help="Path to the point cloud file")
     parser.add_argument('--kernel', type=int, default=3, help="Kernel size for mapping")
+    parser.add_argument('--dilate', action='store_true', help="Use kernel group reduction to dilate voxels")
     parser.add_argument('--channel', type=int, default=16, help="Number of Channels")
     parser.add_argument('--downsample-stride', type=int, default=1, help="Stride for downsample")
     parser.add_argument('--conv-stride', type=int, default=1, help="Stride for convolution")
@@ -42,7 +43,10 @@ if __name__ == '__main__':
 
     if args.pcl_file:
         in_coords, _ = read_point_cloud(args.pcl_file)
-        
+        if args.dilate:
+            assert args.kernel > 3
+            in_coords = dilate_voxels_by_large_kernel_group_reduction(in_coords, args.kernel)
+
     stride = args.downsample_stride
     off_coords = [(0,0,0)]
     if args.kernel == 3:
