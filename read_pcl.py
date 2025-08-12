@@ -279,6 +279,21 @@ def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True)
                 raise ValueError(f"Text file must have at least 3 columns for XYZ, got {data.shape[1]}")
         except Exception as e:
             raise ValueError(f"Failed to parse text file: {e}")
+        
+        min_bound = np.array([0.0, 15.0, -0.5])
+        max_bound = np.array([5.0, 22.0, 4.0])
+        voxel_size = 0.02  # Scalar, same size for all dimensions
+        offset = np.array([0.0, -15.0, 0.5])
+        voxelized_points = voxelize_points(points, min_bound, max_bound, voxel_size, offset)
+
+        if (stride == None):
+            stride = 1
+        voxelized_points = downsample_voxels(voxelized_points, stride)
+        print(f"Loaded {len(voxelized_points)} points")
+
+        # we don't care about actual feature values
+        return voxelized_points, None
+    
     else:
         raise ValueError(f"Unsupported file extension: {extension}")
     
@@ -560,6 +575,6 @@ if __name__ == "__main__":
         coords, features = read_point_cloud(args.file, args.stride, write_simbin=args.write_simbin)
     else:
         coords, features = read_point_cloud(args.file, write_simbin=args.write_simbin)
-    
-    coords = dilate_voxels_by_large_kernel_group_reduction(coords, 17)
-    visualize_point_cloud(coords, features)
+
+    # coords = dilate_voxels_by_large_kernel_group_reduction(coords, 5)
+    visualize_point_cloud(coords, None)

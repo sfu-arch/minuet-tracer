@@ -99,7 +99,11 @@ def get_gemm_intuitions(
     inputs_per_delta = {}
     gemm_sizes_per_delta = {}
     macs_per_delta = {}
+    gathers_per_delta = {}
+    scatters_per_delta = {}
     total_macs = 0
+    total_gathers = 0
+    total_scatters = 0
 
     # 2. Iterate through each delta (kernel offset) and its corresponding input points
     for delta, input_indices in kernel_map.items():
@@ -127,8 +131,16 @@ def get_gemm_intuitions(
         num_macs = m * k * n
         macs_per_delta[delta] = num_macs
 
-        # 4. Add to the total MAC count
+        # 4. Calculate the number of feature item gathers and scatters for this delta
+        gathers = m * k
+        gathers_per_delta[delta] = gathers
+        scatters = m * n
+        scatters_per_delta[delta] = scatters
+
+        # 5. Add to the total MAC count and total scatters and gathers
         total_macs += num_macs
+        total_gathers += gathers
+        total_scatters += scatters
 
     # 5. Compile all stats into a final dictionary
     stats = {
@@ -136,7 +148,11 @@ def get_gemm_intuitions(
         'inputs_per_delta': inputs_per_delta,
         'gemm_sizes_per_delta': gemm_sizes_per_delta,
         'macs_per_delta': macs_per_delta,
-        'total_macs': total_macs
+        'gathers_per_delta': gathers_per_delta,
+        'scatters_per_delta': scatters_per_delta,
+        'total_macs': total_macs,
+        'total_gathers': total_gathers,
+        'total_scatters': total_scatters
     }
 
     return stats
@@ -146,11 +162,11 @@ if __name__ == "__main__":
 
     # Define a sample set of unique input voxels
 
-    voxels, _ = read_point_cloud('examples/000000.bin')
+    voxels, _ = read_point_cloud('examples/000000.bin', 4)
 
     # Set convolution parameters
     k_size = 3
-    in_channels = 32
+    in_channels = 64
     out_filters = 64
     downsample = False
 
@@ -172,10 +188,17 @@ if __name__ == "__main__":
         if num_inputs > 0:  # Only show deltas that have computations
             gemm_shape = gemm_stats['gemm_sizes_per_delta'][delta]['GEMM_shape']
             macs = gemm_stats['macs_per_delta'][delta]
+            gathers = gemm_stats['gathers_per_delta'][delta]
+            scatters = gemm_stats['scatters_per_delta'][delta]
+
             print(f"Delta {delta}:")
             print(f"  - Active Input Points: {num_inputs}")
             print(f"  - GEMM Shape: {gemm_shape}")
             print(f"  - MACs: {macs:,}")
+            print(f"  - Gathers: {gathers:,}")
+            print(f"  - Scatters: {scatters:,}")
 
     print("\n--- Overall Statistics ---")
     print(f"Total Combined MACs for all GEMMs: {gemm_stats['total_macs']:,}")
+    print(f"Total Combined Gathers for all GEMMs: {gemm_stats['total_gathers']:,}")
+    print(f"Total Combined Scatters for all GEMMs: {gemm_stats['total_scatters']:,}")
