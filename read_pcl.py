@@ -1,34 +1,26 @@
-
 import numpy as np
 import os
 import struct
 import open3d as o3d
 from pathlib import Path
 import pandas as pd
+from typing import Tuple
 import argparse
+
 def write_simbin_file(file_path, coords, features=None):
     """
-    Write point cloud data to a simbin file format
-    
-    Args:
-        file_path: Path to output simbin file
-        coords: List of (x,y,z) coordinates
-        features: List of feature vectors (optional)
+    Backward-compatible wrapper that writes using the new simbin format.
+
+    This delegates to write_simbin() to ensure the file can be read by read_simbin().
     """
-    with open(file_path, 'wb') as f:
-        # Write header
-        f.write(b'SIMBIN')
-        f.write(struct.pack('I', len(coords)))  # Number of points
-        
-        # Write coordinates
-        for coord in coords:
-            f.write(struct.pack('fff', *coord))
-        
-        # Write features if available
-        if features is not None:
-            for feat in features:
-                f.write(struct.pack('f' * len(feat), *feat))
-    return 
+    # Normalize inputs to expected dtypes
+    coords_np = np.asarray(coords)
+    if coords_np.dtype not in [np.float32, np.int32]:
+        # Prefer integer grid for quantized coords
+        coords_np = coords_np.astype(np.int32, copy=False)
+    feats_np = None if features is None else np.asarray(features, dtype=np.float32)
+    write_simbin(file_path, coords_np, feats_np)
+    return
 
 def voxelize_points(points, min_bound, max_bound, voxel_size, offset):
     """
@@ -294,6 +286,12 @@ def read_point_cloud(file_path, stride=None, max_points=None, write_simbin=True)
         # we don't care about actual feature values
         return voxelized_points, None
     
+    elif extension == '.simbin':
+        # Read coordinates/features directly from simbin
+        coords, features = read_simbin(str(file_path))
+        print(f"Loaded {len(coords)} points from simbin")
+        return coords, features
+    
     else:
         raise ValueError(f"Unsupported file extension: {extension}")
     
@@ -406,37 +404,65 @@ def read_simbin(file_path):
     Raises:
         ValueError: If the file is not a valid simbin file.
     """
+    file_size = os.path.getsize(file_path)
     with open(file_path, 'rb') as f:
-        # Read header
-        header_size = 6 + 1 + 1 + 4 + 4  # Total bytes in header
-        header = f.read(header_size)
-        if len(header) != header_size:
-            raise ValueError("File is too short to contain a valid simbin header.")
-        
-        magic, version, coord_type, N, feature_dim = struct.unpack('<6sBBII', header)
+        # Try new header first (16 bytes)
+        header_size_new = 6 + 1 + 1 + 4 + 4
+        header = f.read(header_size_new)
+        if len(header) < 10:
+            raise ValueError("File too short to be a simbin file.")
+        magic = header[:6]
         if magic != b'SIMBIN':
             raise ValueError("File does not start with 'SIMBIN' magic number.")
-        if version != 1:
-            raise ValueError("Unsupported simbin version.")
 
-        # Determine coordinate dtype
-        dtype = np.float32 if coord_type == 0 else np.int32
+        coordinates = None
+        features = None
 
-        # Read coordinates
-        coord_bytes = f.read(N * 3 * 4)
-        if len(coord_bytes) != N * 3 * 4:
-            raise ValueError("File does not contain expected coordinate data.")
-        coordinates = np.frombuffer(coord_bytes, dtype=dtype).reshape(N, 3)
+        if len(header) == header_size_new:
+            # Interpret as new header and validate size math; else fallback
+            version, coord_type, N, feature_dim = struct.unpack('<B B I I', header[6:])
+            # Validate version and basic fields
+            valid_basic = (version == 1 and coord_type in (0, 1) and N >= 0 and feature_dim >= 0)
+            # Check if the remaining file size matches expected layout
+            expected_payload = N * 3 * 4 + N * feature_dim * 4
+            remaining = file_size - header_size_new
+            size_ok = remaining == expected_payload
+            if valid_basic and size_ok:
+                dtype = np.float32 if coord_type == 0 else np.int32
+                coord_bytes = f.read(N * 3 * 4)
+                coordinates = np.frombuffer(coord_bytes, dtype=dtype).reshape(N, 3)
+                if feature_dim > 0:
+                    feature_bytes = f.read(N * feature_dim * 4)
+                    features = np.frombuffer(feature_bytes, dtype=np.float32).reshape(N, feature_dim)
+                return coordinates, features
+            else:
+                # Fallback to legacy parse
+                f.seek(0)
 
-        # Read features if present
-        if feature_dim > 0:
-            feature_bytes = f.read(N * feature_dim * 4)
-            if len(feature_bytes) != N * feature_dim * 4:
-                raise ValueError("File does not contain expected feature data.")
-            features = np.frombuffer(feature_bytes, dtype=np.float32).reshape(N, feature_dim)
-        else:
+        # Legacy format: 6s magic + uint32 N, then N*3 float32 coords, optional features contiguous
+        f.seek(6)
+        n_bytes = f.read(4)
+        if len(n_bytes) != 4:
+            raise ValueError("Legacy simbin: missing point count.")
+        (N_legacy,) = struct.unpack('<I', n_bytes)
+        # After legacy header, remaining bytes are coords + optional features
+        remaining = file_size - 10
+        coord_bytes_len = N_legacy * 3 * 4
+        if remaining < coord_bytes_len:
+            raise ValueError("Legacy simbin: file smaller than expected for coordinates.")
+        coord_bytes = f.read(coord_bytes_len)
+        coordinates = np.frombuffer(coord_bytes, dtype=np.float32).reshape(N_legacy, 3)
+        # Determine feature_dim from leftover bytes if any
+        leftover = remaining - coord_bytes_len
+        if leftover == 0:
             features = None
-
+        else:
+            # If leftover is divisible by N*4, interpret as float32 features with D columns
+            if N_legacy == 0 or (leftover % (N_legacy * 4)) != 0:
+                raise ValueError("Legacy simbin: leftover bytes not compatible with features array.")
+            feature_dim = leftover // (N_legacy * 4)
+            feature_bytes = f.read(leftover)
+            features = np.frombuffer(feature_bytes, dtype=np.float32).reshape(N_legacy, feature_dim)
         return coordinates, features
 
 def sample_point_clouds(source_dir, dest_dir, samples_per_category):
@@ -562,6 +588,83 @@ def visualize_point_cloud(coords, features=None):
         o3d.visualization.draw_geometries([pcd])
     except Exception as e:
         print(f"Visualization failed: {e}")
+
+def spatially_pruning_downsample(
+    points: np.ndarray,
+    kernel_size: Tuple[int, int, int],
+    suppression_ratio: float,
+    stride: int = 2
+) -> np.ndarray:
+    """
+    Simulates the VoxelNeXt spatially-pruning downsampling layer.
+
+    Since feature magnitudes are unknown without a trained model, this function
+    randomly selects a subset of points to "dilate" before applying a
+    strided downsampling operation. This models the data-dependent nature
+    of the layer for performance simulation.
+
+    Args:
+        points (np.ndarray): A NumPy array of shape (N, 3) representing the
+                             integer coordinates of active 3D voxels.
+        kernel_size (Tuple[int, int, int]): The size of the dilation kernel,
+                                            e.g., (3, 3, 3).
+        suppression_ratio (float): The ratio of points to treat as "unimportant"
+                                   and not dilate. For VoxelNeXt, this is 0.5.
+        stride (int): The stride for the final downsampling operation.
+                      Defaults to 2.
+
+    Returns:
+        np.ndarray: A new NumPy array of shape (M, 3) with the coordinates
+                    of the active voxels after the operation. M <= N.
+    """
+    if not (0.0 <= suppression_ratio <= 1.0):
+        raise ValueError("suppression_ratio must be between 0.0 and 1.0")
+
+    num_points = points.shape[0]
+    if num_points == 0:
+        return np.array([], dtype=int).reshape(0, 3)
+
+    # 1. Randomly select points for dilation (the "important" points)
+    # This simulates the feature magnitude check without needing the actual features.
+    num_important = int(np.ceil(num_points * (1 - suppression_ratio)))
+    
+    # Create a random permutation of indices and split them
+    shuffled_indices = np.random.permutation(num_points)
+    important_indices = shuffled_indices[:num_important]
+    unimportant_indices = shuffled_indices[num_important:]
+
+    important_points = points[important_indices]
+    unimportant_points = points[unimportant_indices]
+
+    # 2. Perform explicit dilation on the "important" points
+    # For each important point, generate all neighbors within the kernel window.
+    kx, ky, kz = kernel_size
+    offset_x = np.arange(-(kx // 2), (kx // 2) + 1)
+    offset_y = np.arange(-(ky // 2), (ky // 2) + 1)
+    offset_z = np.arange(-(kz // 2), (kz // 2) + 1)
+    
+    # Create a grid of all possible offsets
+    offsets = np.stack(np.meshgrid(offset_x, offset_y, offset_z), axis=-1).reshape(-1, 3)
+
+    # Replicate each important point for each offset and add the offsets
+    # This creates the full set of dilated points
+    dilated_points = important_points[:, np.newaxis, :] + offsets
+
+    # Reshape to a flat list of points
+    dilated_points = dilated_points.reshape(-1, 3)
+
+    # 3. Combine unimportant points with the new dilated set
+    # We use np.unique to ensure each coordinate appears only once.
+    # This is more efficient than a set for large numpy arrays.
+    combined_points = np.vstack([dilated_points, unimportant_points])
+    unique_combined_points = np.unique(combined_points, axis=0)
+
+    # 4. Apply the strided downsampling
+    # A point survives if all its coordinates are divisible by the stride.
+    downsampled_mask = np.all(unique_combined_points % stride == 0, axis=1)
+    final_points = unique_combined_points[downsampled_mask]
+
+    return final_points
 
 
 if __name__ == "__main__":
