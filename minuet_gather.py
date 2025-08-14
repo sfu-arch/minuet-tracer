@@ -76,14 +76,26 @@ def create_in_out_masks(kernel_map, slot_dict, num_offsets, num_sources):
 
         return out_mask, in_mask
 
-    processed_results = []
+    future_to_item = {}
     # Use ThreadPoolExecutor to parallelize the processing of kernel_map items.
     # The default number of worker threads will be used.
     with concurrent.futures.ThreadPoolExecutor() as executor:
         # Submit all items from kernel_map for processing.
         # kernel_map.items() yields (offset, matches_list) tuples.
         futures = [executor.submit(_process_kernel_item, item) for item in kernel_map.items()]
-        
+        future_to_item.update({future: item[0] for future, item in zip(futures, kernel_map.items())})
+
+        # Check for failures in processing.
+        failed = False
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error processing kernel_map item {future_to_item[future]}: {e}")
+                failed = True
+        if failed:
+            raise RuntimeError("create_in_out_masks: Failed to process some items in kernel_map.")
+
     return out_mask, in_mask
 
 

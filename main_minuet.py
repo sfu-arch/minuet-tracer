@@ -19,7 +19,6 @@ if __name__ == '__main__':
     parser.add_argument('--dilate', action='store_true', help="Use kernel group reduction to dilate voxels")
     parser.add_argument('--channel', type=int, default=16, help="Number of Channels")
     parser.add_argument('--downsample-stride', type=int, default=1, help="Stride for downsample")
-    parser.add_argument('--conv-stride', type=int, default=1, help="Stride for convolution")
     parser.add_argument('--output-dir', type=str, help="Output directory for traces")
     parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
     args = parser.parse_args()
@@ -47,7 +46,7 @@ if __name__ == '__main__':
             assert args.kernel > 3
             in_coords = dilate_voxels_by_large_kernel_group_reduction(in_coords, args.kernel)
     print("Size of input coordinates:", len(in_coords))
-    stride = args.conv_stride
+    conv_stride = 1
     off_coords = [(0,0,0)]
     if args.kernel == 3:
         off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
@@ -58,12 +57,12 @@ if __name__ == '__main__':
     
     # Phase 1: Sort and deduplicate input coordinates
     print(f"\n--- Phase: {curr_phase} with {minuet_config.NUM_THREADS} threads ---")
-    uniq_coords = compute_unique_sorted_coords(in_coords, stride)
+    uniq_coords = compute_unique_sorted_coords(in_coords, conv_stride)
 
     # Phase 2: Build query data structures
     print('--- Phase: Build Queries ---')
     qry_keys, qry_in_idx, qry_off_idx, wt_offsets = build_coordinate_queries(
-        uniq_coords, stride, off_coords
+        uniq_coords, conv_stride, off_coords
     )
 
     # Phase 3: Sort query keys (using existing sorted keys)
