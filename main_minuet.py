@@ -42,12 +42,12 @@ if __name__ == '__main__':
     print(f"channel: {args.channel}")
 
     if args.pcl_file:
-        in_coords, _ = read_point_cloud(args.pcl_file)
+        in_coords, _ = read_point_cloud(args.pcl_file, args.downsample_stride)
         if args.dilate:
             assert args.kernel > 3
             in_coords = dilate_voxels_by_large_kernel_group_reduction(in_coords, args.kernel)
-
-    stride = args.downsample_stride
+    print("Size of input coordinates:", len(in_coords))
+    stride = args.conv_stride
     off_coords = [(0,0,0)]
     if args.kernel == 3:
         off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
