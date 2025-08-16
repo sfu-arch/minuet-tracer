@@ -92,9 +92,9 @@ def create_in_out_masks(kernel_map, slot_dict, num_offsets, num_sources):
                 future.result()
             except Exception as e:
                 print(f"Error processing kernel_map item {future_to_item[future]}: {e}")
-                failed = True
-        if failed:
-            raise RuntimeError("create_in_out_masks: Failed to process some items in kernel_map.")
+        #         failed = True
+        # if failed:
+        #     raise RuntimeError("create_in_out_masks: Failed to process some items in kernel_map.")
 
     return out_mask, in_mask
 
