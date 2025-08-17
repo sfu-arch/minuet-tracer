@@ -58,6 +58,8 @@ if __name__ == '__main__':
         off_coords = [(dx,dy,dz) for dx in (-1,0,1) for dy in (-1,0,1) for dz in (-1,0,1)]
     elif args.kernel == 5:
         off_coords = [(dx,dy,dz) for dx in (-2,-1,0,1,2) for dy in (-2,-1,0,1,2) for dz in (-2,-1,0,1,2)]
+    elif args.kernel == 7:
+        off_coords = [(dx,dy,dz) for dx in (-3,-2,-1,0,1,2,3) for dy in (-3,-2,-1,0,1,2,3) for dz in (-3,-2,-1,0,1,2,3)]
 
     ####################### Phase 1 Mapping #######################
     

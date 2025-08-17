@@ -1,7 +1,7 @@
 {
-  "map_trace.bin.gz": "f83299cc",
-  "metadata.bin.gz": "362d24c3",
-  "gemms.bin.gz": "46101557",
-  "gather_trace.bin.gz": "dfea7738",
-  "scatter_trace.bin.gz": "7904127e"
+  "map_trace.bin.gz": "8242132e",
+  "metadata.bin.gz": "b187da2d",
+  "gemms.bin.gz": "2fa9f624",
+  "gather_trace.bin.gz": "129827d5",
+  "scatter_trace.bin.gz": "983dea69"
 }

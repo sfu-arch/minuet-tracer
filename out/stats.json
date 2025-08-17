@@ -1,20 +1,644 @@
 {
-  "num_points": 214344,
+  "num_points": 15302,
   "kmap": {
-    "num_keys": 1,
-    "avg_length": 214344.0
+    "num_keys": 343,
+    "avg_length": 2983.5160349854227
   },
   "gemm_list": [
     {
       "num_offsets": 1,
-      "gemm_M": 229376,
-      "slots": 214344,
-      "padding": 15032
+      "gemm_M": 16384,
+      "slots": 15302,
+      "padding": 1082
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 11575,
+      "padding": 4809
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 11575,
+      "padding": 4809
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9984,
+      "padding": 6400
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9984,
+      "padding": 6400
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9947,
+      "padding": 6437
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9947,
+      "padding": 6437
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9155,
+      "padding": 7229
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 9155,
+      "padding": 7229
+    },
+    {
+      "num_offsets": 1,
+      "gemm_M": 16384,
+      "slots": 8430,
+      "padding": 7954
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 16101,
+      "padding": 283
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15325,
+      "padding": 1059
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15224,
+      "padding": 1160
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14463,
+      "padding": 1921
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13772,
+      "padding": 2612
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13727,
+      "padding": 2657
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13536,
+      "padding": 2848
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13184,
+      "padding": 3200
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12932,
+      "padding": 3452
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12784,
+      "padding": 3600
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12332,
+      "padding": 4052
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11950,
+      "padding": 4434
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11867,
+      "padding": 4517
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11666,
+      "padding": 4718
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11249,
+      "padding": 5135
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 16100,
+      "padding": 284
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15662,
+      "padding": 722
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15442,
+      "padding": 942
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15214,
+      "padding": 1170
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15088,
+      "padding": 1296
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14751,
+      "padding": 1633
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14465,
+      "padding": 1919
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14383,
+      "padding": 2001
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14217,
+      "padding": 2167
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14006,
+      "padding": 2378
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13934,
+      "padding": 2450
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13730,
+      "padding": 2654
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 13392,
+      "padding": 2992
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12765,
+      "padding": 3619
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12547,
+      "padding": 3837
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 16146,
+      "padding": 238
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15862,
+      "padding": 522
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 15428,
+      "padding": 956
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14922,
+      "padding": 1462
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 14024,
+      "padding": 2360
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 12652,
+      "padding": 3732
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11946,
+      "padding": 4438
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11658,
+      "padding": 4726
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11416,
+      "padding": 4968
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 11262,
+      "padding": 5122
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10810,
+      "padding": 5574
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10652,
+      "padding": 5732
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10544,
+      "padding": 5840
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10466,
+      "padding": 5918
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10316,
+      "padding": 6068
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10126,
+      "padding": 6258
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 10074,
+      "padding": 6310
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9952,
+      "padding": 6432
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9676,
+      "padding": 6708
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9474,
+      "padding": 6910
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9304,
+      "padding": 7080
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9128,
+      "padding": 7256
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 9044,
+      "padding": 7340
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 8790,
+      "padding": 7594
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 8634,
+      "padding": 7750
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 8530,
+      "padding": 7854
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 8292,
+      "padding": 8092
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 8112,
+      "padding": 8272
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 7852,
+      "padding": 8532
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 7248,
+      "padding": 9136
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6930,
+      "padding": 9454
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6846,
+      "padding": 9538
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6672,
+      "padding": 9712
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6488,
+      "padding": 9896
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6368,
+      "padding": 10016
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6322,
+      "padding": 10062
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6234,
+      "padding": 10150
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 6154,
+      "padding": 10230
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5944,
+      "padding": 10440
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5780,
+      "padding": 10604
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5650,
+      "padding": 10734
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5490,
+      "padding": 10894
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5442,
+      "padding": 10942
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5432,
+      "padding": 10952
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5388,
+      "padding": 10996
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5312,
+      "padding": 11072
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5302,
+      "padding": 11082
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5200,
+      "padding": 11184
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5166,
+      "padding": 11218
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 5002,
+      "padding": 11382
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4938,
+      "padding": 11446
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4898,
+      "padding": 11486
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4862,
+      "padding": 11522
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4756,
+      "padding": 11628
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4630,
+      "padding": 11754
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4526,
+      "padding": 11858
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4450,
+      "padding": 11934
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4376,
+      "padding": 12008
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4308,
+      "padding": 12076
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4126,
+      "padding": 12258
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 4010,
+      "padding": 12374
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 3856,
+      "padding": 12528
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 3826,
+      "padding": 12558
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 3650,
+      "padding": 12734
+    },
+    {
+      "num_offsets": 2,
+      "gemm_M": 16384,
+      "slots": 1810,
+      "padding": 14574
     }
   ],
   "memory_accesses": {
-    "map_phase": 7789161,
-    "gather_phase": 1714752,
-    "scatter_phase": 1714752
+    "map_phase": 132774177,
+    "gather_phase": 4154592,
+    "scatter_phase": 8186768
   }
 }
