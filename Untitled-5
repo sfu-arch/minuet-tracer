@@ -1,0 +1,76 @@
+------ ORIGINAL -------------
+
+
+1. weight_tiles := tile the weight_tensor according to fabtic capacity
+2. for weigh_tile in weight_tiles:
+3.     load tile into PE SPMs (weight buffers) according to model compiler weigh assignment
+4.     for map_item in neighbor_maps:
+5.         [(output_coord, output_indx), {(input_delta_offset_i, input_indx_i)}] <-- map_item
+6.         wait until empty spot available in output buffer for (output_coord, output_indx)
+7.         preload the reserved spot with expected_accumulations_count (and optinally previous psums) for (output_coord, output_indx)
+           // expected_accumulations_count = map_item.neighbors.size() * sub_chunks_per_feature
+           // a total of expected_accumulations_count accumulations will occur for each output
+8.         fuse {((input_coord_i, input_indx_i), input_delta_offset_i)} to trans-map buffer
+           // groups map items by (input_coord, input_indx) for input reuse
+           // trans-map item: (input_coord, input_indx) --> {output_delta_i}
+9.         pre-fetch trans-map item input features, once an input feature (IFx) is ready
+10.        (input_coord_x, input_indx_x), {output_deltas_x} = trans_map.pop(IFx.coord)
+11.        parallel-for output_delta_i : {output_deltas_x}: // input feature to PE-rows multi-cast
+12.            output_coord_i = output_delta_i + input_coord_x
+13.            parallel-for output_channel in weight_tiles.filters_range: // different filters (output channels) parallel over PE columns
+14.                parallel-for IFx_chunk in IFx: // each input feature would be divided to several over channels dim
+15.                    output_buffer[output_coord_i][output_channel].value += IFx · weigh_tile[output_deltas_x][output_channel]
+16.                    output_buffer[output_coord_i][output_channel].accumulations_count += 1
+17.                    if for all out_ch output_buffer[output_coord_i][out_ch].accumulations_count == output_buffer[output_coord_i].expected_accumulations_count:
+18.                        evict output_buffer[output_coord_i] // finalized for current weight tile
+
+
+------ MODIFIED --------------
+Trans-Map Construction (Input Reuse Optimization)
+for tile in cubes:
+  trans_map := empty_map() // (input_coord, input_indx) -> {output_deltas}
+  for p in tile:
+    input_coord := p.coord
+    input_indx := p.indx
+    forall δ in kernel_offsets:
+      output_delta := δ
+      output_coord := input_coord + output_delta
+      // GROUP: fuse multiple outputs per input for reuse
+      trans_map[input_coord, input_indx].append(output_delta)
+
+Inputs Multicast
+for tile in cubes:
+  // SYNC: initialize output buffers with expected accumulation counts
+  for output_coord in tile.output_coords:
+    output_buffer[output_coord].expected_accumulations := sparse_density * kernel_size
+    output_buffer[output_coord].accumulations_count := 0
+  
+  // REUSE: process via trans-map for input feature reuse
+  for (input_coord, input_indx), output_deltas in trans_map:
+    F = A[input_coord].feat #sparse 
+    // FLOW CONTROL: wait until input feature F is available
+    forall output_delta in output_deltas:
+      δ := output_delta
+      if input_coord.δ == row.δ:
+        Row[δ].enqueue(F, output_deltas) 
+        // SYNC: signal feature availability to PE row δ with reuse info
+
+Weight Stationary
+#unroll columns
+for f in (0:f,f_tile):
+  for ch in (0:C:Ctile): 
+    Col[f] = W[δ,f,ch]
+    // SYNC: wait for weight loading completion across PE columns
+
+Output Stationary
+for δ in rows:
+  // SYNC: wait until Row[δ] has input features available
+  for c in cols: 
+    // FLOW CONTROL: ensure weight Col[c] is loaded
+    output_coord := compute_output_coord(p, δ)
+    output_buffer[output_coord][c].value += A[p] ⊙ W[δ,f,ch]
+    output_buffer[output_coord][c].accumulations_count += 1
+    // COMPLETION CHECK: accumulation counting and eviction
+    if output_buffer[output_coord][c].accumulations_count == output_buffer[output_coord].expected_accumulations:
+      O_map[output_coord][c] = output_buffer[output_coord][c].value
+      // SYNC: evict completed output from buffer

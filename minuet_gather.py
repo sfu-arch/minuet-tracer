@@ -508,18 +508,30 @@ def gather_thread(
 
     def record_local(thread_id, op, addr):
         """Record a memory access in thread-local storage"""
-        if not hasattr(t_local, 'local_trace'):
-            t_local.local_trace = []
-            
-        tensor = mapping_module.addr_to_tensor(addr)
-        # Assuming mapping_module.curr_phase is set appropriately for the gather operation
-        entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
-        t_local.local_trace.append(entry)
+        # Increment thread-local counter
+        if not hasattr(t_local, 'local_counter'):
+            t_local.local_counter = 0
+        t_local.local_counter += 1
+        
+        # Only record trace if tracing is enabled
+        if minuet_config.ENABLE_MEM_TRACE:
+            if not hasattr(t_local, 'local_trace'):
+                t_local.local_trace = []
+                
+            tensor = mapping_module.addr_to_tensor(addr)
+            # Assuming mapping_module.curr_phase is set appropriately for the gather operation
+            entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
+            t_local.local_trace.append(entry)
 
     def flush_local_trace():
         """Transfer thread-local trace to global mem_trace and clear local trace"""
-        if hasattr(t_local, 'local_trace') and t_local.local_trace:
-            with gmem_lock:
+        # Add thread-local counter to global counter with lock
+        with gmem_lock:
+            if hasattr(t_local, 'local_counter'):
+                minuet_config.mem_access_counter += t_local.local_counter
+                t_local.local_counter = 0
+            
+            if minuet_config.ENABLE_MEM_TRACE and hasattr(t_local, 'local_trace') and t_local.local_trace:
                 minuet_config.mem_trace.extend(t_local.local_trace)
                 t_local.local_trace = [] # Clear after flushing
 
@@ -647,15 +659,27 @@ def scatter_thread(
     t_local = threading.local()
 
     def record_local(thread_id, op, addr):
-        if not hasattr(t_local, 'local_trace'):
-            t_local.local_trace = []
-        tensor = mapping_module.addr_to_tensor(addr)
-        entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
-        t_local.local_trace.append(entry)
+        # Increment thread-local counter
+        if not hasattr(t_local, 'local_counter'):
+            t_local.local_counter = 0
+        t_local.local_counter += 1
+        
+        # Only record trace if tracing is enabled
+        if minuet_config.ENABLE_MEM_TRACE:
+            if not hasattr(t_local, 'local_trace'):
+                t_local.local_trace = []
+            tensor = mapping_module.addr_to_tensor(addr)
+            entry = (mapping_module.curr_phase, thread_id, op, tensor, addr)
+            t_local.local_trace.append(entry)
 
     def flush_local_trace():
-        if hasattr(t_local, 'local_trace') and t_local.local_trace:
-            with gmem_lock:
+        # Add thread-local counter to global counter with lock
+        with gmem_lock:
+            if hasattr(t_local, 'local_counter'):
+                minuet_config.mem_access_counter += t_local.local_counter
+                t_local.local_counter = 0
+            
+            if minuet_config.ENABLE_MEM_TRACE and hasattr(t_local, 'local_trace') and t_local.local_trace:
                 minuet_config.mem_trace.extend(t_local.local_trace)
                 t_local.local_trace = []
 

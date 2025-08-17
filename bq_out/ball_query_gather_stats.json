@@ -1,0 +1,28 @@
+{
+  "ball_query": {
+    "total_queries": 11677,
+    "total_results": 88144,
+    "avg_results_per_query": 7.548514173160915,
+    "radius": 1.5,
+    "max_points": 16,
+    "threads": 128
+  },
+  "gather": {
+    "total_inputs": 11677,
+    "active_inputs": 11677,
+    "memory_reduction_factor": 7.548514173160915,
+    "bandwidth_saved_percent": 86.75235977491378,
+    "tiles_per_point": 4,
+    "tile_feature_size": 16,
+    "bulk_feature_size": 4,
+    "max_neighbors_per_query": 16,
+    "slots_per_query_padded": 16,
+    "total_slots_allocated": 186832,
+    "padding_per_query": 0
+  },
+  "checksums": {
+    "ball_query_trace": "d8940507",
+    "gather_trace": "78782e57",
+    "gemm_list": "1a9435fd"
+  }
+}

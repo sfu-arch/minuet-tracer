@@ -1,0 +1,59 @@
+ORIGINAL ALGORITHM
+---------------------
+1. weight_tiles := tile the weight_tensor according to fabtic capacity
+2. for weigh_tile in weight_tiles:
+3.     load tile into PE SPMs (weight buffers) according to model compiler weigh assignment
+4.     for map_item in neighbor_maps:
+5.         [(output_coord, output_indx), {(input_delta_offset_i, input_indx_i)}] <-- map_item
+6.         wait until empty spot available in output buffer for (output_coord, output_indx)
+7.         preload the reserved spot with expected_accumulations_count (and optinally previous psums) for (output_coord, output_indx)
+           // expected_accumulations_count = map_item.neighbors.size() * sub_chunks_per_feature
+           // a total of expected_accumulations_count accumulations will occur for each output
+8.         fuse {((input_coord_i, input_indx_i), input_delta_offset_i)} to trans-map buffer
+           // groups map items by (input_coord, input_indx) for input reuse
+           // trans-map item: (input_coord, input_indx) --> {output_delta_i}
+9.         pre-fetch trans-map item input features, once an input feature (IFx) is ready
+10.        (input_coord_x, input_indx_x), {output_deltas_x} = trans_map.pop(IFx.coord)
+11.        parallel-for output_delta_i : {output_deltas_x}: // input feature to PE-rows multi-cast
+12.            output_coord_i = output_delta_i + input_coord_x
+13.            parallel-for output_channel in weight_tiles.filters_range: // different filters (output channels) parallel over PE columns
+14.                parallel-for IFx_chunk in IFx: // each input feature would be divided to several over channels dim
+15.                    output_buffer[output_coord_i][output_channel].value += IFx · weigh_tile[output_deltas_x][output_channel]
+16.                    output_buffer[output_coord_i][output_channel].accumulations_count += 1
+17.                    if for all out_ch output_buffer[output_coord_i][out_ch].accumulations_count == output_buffer[output_coord_i].expected_accumulations_count:
+18.                        evict output_buffer[output_coord_i] // finalized for current weight tile
+
+
+MODIFIED ALGORITHM
+---------------------
+1. weight_tiles := tile the weight_tensor according to fabric capacity
+2. for weight_tile in weight_tiles:
+3.     load weight_tile into PE columns according to fabric assignment
+4.     // SYNC: wait for all PE columns to finish weight loading
+5.     for tile in input_cubes:
+6.         initialize output_buffer with expected_accumulation_counts for this tile
+7.         // expected_accumulations = sparse_density * kernel_size * input_channels  
+8.         for p in tile: 
+9.             F = A[p].feat // sparse input feature
+10.            // FLOW CONTROL: wait until input feature F is available
+11.            forall δ in kernel_offsets: // 27 for 3x3x3 kernel
+12.                if p.δ == row.δ:
+13.                    Row[δ].enqueue(F) // INPUT MULTICAST to PE rows
+14.                    // SYNC: signal feature availability to PE row δ
+15.        
+16.        // WEIGHTS: unroll columns (already loaded in step 3)
+17.        for f in (0:F_out, F_tile):
+18.            for ch in (0:C_in, C_tile): 
+19.                Col[f] = W[δ,f,ch] // weight broadcast to PE column f
+20.
+21.        // OUTPUT STATIONARY with accumulation counting
+22.        for δ in rows:
+23.            // SYNC: wait until Row[δ] has available input features
+24.            for f in cols: 
+25.                // FLOW CONTROL: ensure weight Col[f] is loaded
+26.                output_buffer[output_coord][f].value += A[p] ⊙ W[δ,f,ch]
+27.                output_buffer[output_coord][f].accumulations_count += 1
+28.                // COMPLETION CHECK: accumulation counting
+29.                if output_buffer[output_coord][f].accumulations_count == expected_accumulations:
+30.                    O_map[output_coord][f] = output_buffer[output_coord][f].value
+31.                    // SYNC: signal completion, evict from output buffer

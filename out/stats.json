@@ -1,0 +1,19 @@
+{
+  "kmap": {
+    "num_keys": 1,
+    "avg_length": 214344.0
+  },
+  "gemm_list": [
+    {
+      "num_offsets": 1,
+      "gemm_M": 229376,
+      "slots": 214344,
+      "padding": 15032
+    }
+  ],
+  "memory_accesses": {
+    "map_phase": 7789161,
+    "gather_phase": 1714752,
+    "scatter_phase": 1714752
+  }
+}

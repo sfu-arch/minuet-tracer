@@ -21,6 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('--downsample-stride', type=int, default=1, help="Stride for downsample")
     parser.add_argument('--output-dir', type=str, help="Output directory for traces")
     parser.add_argument('--config', type=str, default='config.json', help="Path to the Minuet configuration file", required=True)
+    parser.add_argument('--disable-trace', action='store_true', help="Disable memory trace recording (only count accesses)")
     args = parser.parse_args()
 
     # Load configuration
@@ -30,6 +31,11 @@ if __name__ == '__main__':
     if args.output_dir:
         minuet_config.output_dir = args.output_dir
     minuet_config.NUM_TILES_GATHER = 1 + (args.channel - 1) // minuet_config.TILE_FEATS_GATHER
+    
+    # Handle disable trace flag
+    if args.disable_trace:
+        minuet_config.set_mem_trace_enabled(False)
+        print("Memory tracing disabled - only counting accesses")
 
     # Show that configuration has been loaded
     print(f"Configuration loaded from {args.config}")
@@ -54,6 +60,9 @@ if __name__ == '__main__':
         off_coords = [(dx,dy,dz) for dx in (-2,-1,0,1,2) for dy in (-2,-1,0,1,2) for dz in (-2,-1,0,1,2)]
 
     ####################### Phase 1 Mapping #######################
+    
+    # Reset counter before map phase (includes all mapping operations)
+    minuet_config.mem_access_counter = 0
     
     # Phase 1: Sort and deduplicate input coordinates
     print(f"\n--- Phase: {curr_phase} with {minuet_config.NUM_THREADS} threads ---")
@@ -81,14 +90,18 @@ if __name__ == '__main__':
         qry_off_idx, wt_offsets, coord_tiles, pivs, 2
     )
     
+    # Collect map phase stats
+    map_phase_accesses = minuet_config.mem_access_counter
+    
     curr_phase = None
         
     # Create output directory if it doesn't exist
     if not os.path.exists(minuet_config.output_dir):
         os.makedirs(minuet_config.output_dir)
     
-
-    map_trace_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'map_trace.bin.gz'), sizeof_addr=8)
+    # Only write map trace if tracing is enabled
+    map_trace_checksum = None
+    map_trace_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'map_trace.bin.gz'), sizeof_addr=8)    
     write_kernel_map_to_gz(kmap, os.path.join(minuet_config.output_dir, 'kernel_map.bin.gz'), off_coords)
 
     
@@ -129,6 +142,8 @@ if __name__ == '__main__':
    
     
     from minuet_gather import mt_gather
+    # Reset counter before gather phase
+    minuet_config.mem_access_counter = 0
     mt_gather(
         num_threads=minuet_config.N_THREADS_GATHER,  # Updated parameter name
         num_points=len(uniq_coords),
@@ -140,11 +155,17 @@ if __name__ == '__main__':
         sources=None,
         gemm_buffers= gemm_buffer
     )
+    
+    # Collect gather phase stats
+    gather_phase_accesses = minuet_config.mem_access_counter
 
-
+    # Only write gather trace if tracing is enabled
+    gather_checksum = None
     gather_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'gather_trace.bin.gz'), sizeof_addr=8)
-
+    
     from minuet_gather import mt_gather
+    # Reset counter before scatter phase
+    minuet_config.mem_access_counter = 0
     mt_scatter(
         num_threads=minuet_config.N_THREADS_GATHER,  # Updated parameter name
         num_points=len(uniq_coords),
@@ -156,9 +177,14 @@ if __name__ == '__main__':
         gemm_buffers=None,
         outputs=None
         )
+    
+    # Collect scatter phase stats
+    scatter_phase_accesses = minuet_config.mem_access_counter
 
+    # Only write scatter trace if tracing is enabled
+    scatter_checksum = None
     scatter_checksum = write_gmem_trace(os.path.join(minuet_config.output_dir, 'scatter_trace.bin.gz'), sizeof_addr=8)
-
+    
     # Write all checksums to file as json
     checksums = {
         "map_trace.bin.gz": map_trace_checksum,
@@ -171,6 +197,32 @@ if __name__ == '__main__':
     import json    
     with open(os.path.join(minuet_config.output_dir, 'checksums.json'), 'w') as f:
         json.dump(checksums, f, indent=2)
+
+    # Generate statistics for stats.json
+    # Calculate kmap statistics
+    kmap_num_keys = len(kmap.keys())
+    kmap_avg_length = sum(len(kmap[key]) for key in kmap) / kmap_num_keys if kmap_num_keys > 0 else 0
+    
+    # Prepare stats dictionary
+    stats = {
+        "kmap": {
+            "num_keys": kmap_num_keys,
+            "avg_length": kmap_avg_length
+        },
+        "gemm_list": gemm_list,
+        "memory_accesses": {
+            "map_phase": map_phase_accesses,
+            "gather_phase": gather_phase_accesses,
+            "scatter_phase": scatter_phase_accesses
+        }
+    }
+    
+    # Write stats.json
+    with open(os.path.join(minuet_config.output_dir, 'stats.json'), 'w') as f:
+        json.dump(stats, f, indent=2)
+
+    # Display memory access statistics
+    minuet_config.print_mem_access_stats()
 
  
     

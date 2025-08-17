@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>3D_Network_Configurations.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="3d-point-cloud-network-configurations">3D Point Cloud Network Configurations</h1>
+<p>This document provides detailed network architectures and configurations for 5 state-of-the-art 3D sparse convolution networks used in LiDAR point cloud processing.</p>
+<h2 id="overview">Overview</h2>
+<p>All networks are designed for semantic segmentation of 3D point clouds with the following standard configuration:</p>
+<ul>
+<li><strong>Input</strong>: 100,000 points with 4 channels (x, y, z, intensity)</li>
+<li><strong>Output</strong>: 20 semantic classes</li>
+<li><strong>Voxel size</strong>: 0.05m resolution</li>
+<li><strong>Sparsity modeling</strong>: Advanced spatial, feature, weight, and channel sparsity</li>
+</ul>
+<h2 id="sparsity-configuration">Sparsity Configuration</h2>
+<h3 id="default-sparsity-parameters">Default Sparsity Parameters</h3>
+<pre class="hljs"><code><div><span class="hljs-meta">@dataclass</span>
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">SparsityConfig</span>:</span>
+    spatial_sparsity: float = <span class="hljs-number">0.05</span>    <span class="hljs-comment"># 5% spatial occupancy (LiDAR typical)</span>
+    feature_sparsity: float = <span class="hljs-number">0.5</span>     <span class="hljs-comment"># 50% feature sparsity (ReLU zeros)</span>
+    weight_sparsity: float = <span class="hljs-number">0.3</span>      <span class="hljs-comment"># 30% weight sparsity (conservative pruning)</span>
+    channel_sparsity: float = <span class="hljs-number">0.0</span>     <span class="hljs-comment"># No channel pruning</span>
+</div></code></pre>
+<h3 id="dataset-specific-spatial-sparsity">Dataset-Specific Spatial Sparsity</h3>
+<ul>
+<li><strong>SemanticKITTI</strong>: 3-5% voxel occupancy</li>
+<li><strong>nuScenes</strong>: 8-12% voxel occupancy</li>
+<li><strong>ScanNet (indoor)</strong>: 15-25% voxel occupancy</li>
+<li><strong>S3DIS (indoor)</strong>: 20-30% voxel occupancy</li>
+</ul>
+<h3 id="weight-sparsity-potential">Weight Sparsity Potential</h3>
+<table>
+<thead>
+<tr>
+<th>Network</th>
+<th>Conservative (&lt;1% acc loss)</th>
+<th>Moderate (<img class="emoji" alt="heart" src="data:image/png;base64,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" />% acc loss)</th>
+<th>Aggressive (&lt;5% acc loss)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MinkowskiNet</td>
+<td>30%</td>
+<td>50%</td>
+<td>70%</td>
+</tr>
+<tr>
+<td>SPVNAS</td>
+<td>25%</td>
+<td>45%</td>
+<td>65%</td>
+</tr>
+<tr>
+<td>LargeKernel3D</td>
+<td>20%</td>
+<td>40%</td>
+<td>60%</td>
+</tr>
+<tr>
+<td>VoxelNeXt</td>
+<td>25%</td>
+<td>45%</td>
+<td>65%</td>
+</tr>
+<tr>
+<td>RSN</td>
+<td>30%</td>
+<td>50%</td>
+<td>70%</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="1-minkowskinet">1. MinkowskiNet</h2>
+<p><strong>Paper</strong>: <a href="https://arxiv.org/abs/1904.08755">4D Spatio-Temporal ConvNets: Minkowski Convolutional Neural Networks</a><br>
+<strong>Repository</strong>: https://github.com/NVIDIA/MinkowskiEngine</p>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<p>MinkowskiNet follows a U-Net style encoder-decoder architecture with sparse convolutions.</p>
+<h3 id="network-configuration">Network Configuration</h3>
+<h4 id="initial-convolution">Initial Convolution</h4>
+<ul>
+<li><strong>Input</strong>: 4 channels → 32 channels</li>
+<li><strong>Kernel size</strong>: 3×3×3</li>
+<li><strong>Operation</strong>: Sparse 3D convolution</li>
+</ul>
+<h4 id="encoder-downsampling-path">Encoder (Downsampling Path)</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Stride</th>
+<th>Kernel Size</th>
+<th>Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>32</td>
+<td>64</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Sparse conv + downsample</td>
+</tr>
+<tr>
+<td>2</td>
+<td>64</td>
+<td>128</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Sparse conv + downsample</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>256</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Sparse conv + downsample</td>
+</tr>
+<tr>
+<td>4</td>
+<td>256</td>
+<td>512</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Sparse conv + downsample</td>
+</tr>
+</tbody>
+</table>
+<h4 id="decoder-upsampling-path">Decoder (Upsampling Path)</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Stride</th>
+<th>Kernel Size</th>
+<th>Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>512</td>
+<td>256</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Transposed conv + upsample</td>
+</tr>
+<tr>
+<td>2</td>
+<td>256</td>
+<td>128</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Transposed conv + upsample</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>64</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Transposed conv + upsample</td>
+</tr>
+<tr>
+<td>4</td>
+<td>64</td>
+<td>32</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>Transposed conv + upsample</td>
+</tr>
+</tbody>
+</table>
+<h4 id="classification-head">Classification Head</h4>
+<ul>
+<li><strong>Input</strong>: 32 channels → 20 classes</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Point-wise classification</li>
+</ul>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>Symmetric encoder-decoder design</li>
+<li>Consistent 3×3×3 kernel size throughout</li>
+<li>8× downsampling in encoder (2³ at each stage)</li>
+<li>Skip connections between encoder and decoder stages</li>
+</ul>
+<hr>
+<h2 id="2-spvnas-sparse-point-voxel-nas">2. SPVNAS (Sparse Point-Voxel NAS)</h2>
+<p><strong>Paper</strong>: <a href="https://arxiv.org/abs/2007.16100">Searching Efficient 3D Architectures with Sparse Point-Voxel Convolution</a><br>
+<strong>Repository</strong>: https://github.com/mit-han-lab/spvnas</p>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<p>SPVNAS uses Neural Architecture Search (NAS) to find efficient sparse convolution architectures with optimized channel configurations.</p>
+<h3 id="network-configuration">Network Configuration</h3>
+<h4 id="stem-convolutions">Stem Convolutions</h4>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stem 1</td>
+<td>4</td>
+<td>32</td>
+<td>3×3×3</td>
+<td>Sparse 3D conv</td>
+</tr>
+<tr>
+<td>Stem 2</td>
+<td>32</td>
+<td>32</td>
+<td>3×3×3</td>
+<td>Sparse 3D conv</td>
+</tr>
+</tbody>
+</table>
+<h4 id="spvnas-blocks-nas-optimized">SPVNAS Blocks (NAS-Optimized)</h4>
+<table>
+<thead>
+<tr>
+<th>Block</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Stride</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>32</td>
+<td>48</td>
+<td>3×3×3</td>
+<td>1</td>
+<td>Efficient expansion</td>
+</tr>
+<tr>
+<td>2</td>
+<td>48</td>
+<td>64</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Moderate growth + downsample</td>
+</tr>
+<tr>
+<td>3</td>
+<td>64</td>
+<td>128</td>
+<td>3×3×3</td>
+<td>1</td>
+<td>Standard growth</td>
+</tr>
+<tr>
+<td>4</td>
+<td>128</td>
+<td>256</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Final expansion + downsample</td>
+</tr>
+</tbody>
+</table>
+<h4 id="decoder-with-skip-connections">Decoder with Skip Connections</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>256</td>
+<td>128</td>
+<td>3×3×3</td>
+<td>Upsample (4×)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>128</td>
+<td>64</td>
+<td>3×3×3</td>
+<td>Upsample (4×)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>64</td>
+<td>32</td>
+<td>3×3×3</td>
+<td>Upsample (4×)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="point-wise-classification">Point-wise Classification</h4>
+<ul>
+<li><strong>Input</strong>: 32 channels → 20 classes</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Point-wise sparse convolution</li>
+</ul>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>NAS-optimized channel progression: 32→48→64→128→256</li>
+<li>Strategic downsampling at blocks 2 and 4</li>
+<li>Efficient 4× upsampling in decoder</li>
+<li>Skip connections for feature fusion</li>
+</ul>
+<hr>
+<h2 id="3-largekernel3d">3. LargeKernel3D</h2>
+<p><strong>Paper</strong>: Large Kernel Convolutions for 3D Processing<br>
+<strong>Repository</strong>: https://github.com/dvlab-research/LargeKernel3D</p>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<p>LargeKernel3D explores the use of large kernel convolutions (5×5×5, 7×7×7, 9×9×9) to capture extended spatial context in 3D scenes.</p>
+<h3 id="network-configuration">Network Configuration</h3>
+<h4 id="stem-layer">Stem Layer</h4>
+<ul>
+<li><strong>Input</strong>: 4 channels → 64 channels</li>
+<li><strong>Kernel size</strong>: 3×3×3</li>
+<li><strong>Operation</strong>: Standard sparse convolution</li>
+</ul>
+<h4 id="large-kernel-stages">Large Kernel Stages</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Stride</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>64</td>
+<td>96</td>
+<td>5×5×5</td>
+<td>1</td>
+<td>Medium kernel</td>
+</tr>
+<tr>
+<td>2</td>
+<td>96</td>
+<td>128</td>
+<td>7×7×7</td>
+<td>2</td>
+<td>Large kernel + downsample</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>192</td>
+<td>9×9×9</td>
+<td>1</td>
+<td>Very large kernel</td>
+</tr>
+<tr>
+<td>4</td>
+<td>192</td>
+<td>256</td>
+<td>7×7×7</td>
+<td>2</td>
+<td>Large kernel + downsample</td>
+</tr>
+</tbody>
+</table>
+<h4 id="decoder-with-progressive-kernel-reduction">Decoder with Progressive Kernel Reduction</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>256</td>
+<td>192</td>
+<td>5×5×5</td>
+<td>Upsample (4×)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>192</td>
+<td>128</td>
+<td>3×3×3</td>
+<td>Upsample (4×)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>64</td>
+<td>3×3×3</td>
+<td>Upsample (4×)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="classification-head">Classification Head</h4>
+<ul>
+<li><strong>Input</strong>: 64 channels → 20 classes</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Point-wise classification</li>
+</ul>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>Progressive kernel size increase: 3→5→7→9→7</li>
+<li>Largest kernel (9×9×9) for maximum receptive field</li>
+<li>Progressive kernel size reduction in decoder</li>
+<li>Balanced channel growth: 64→96→128→192→256</li>
+</ul>
+<hr>
+<h2 id="4-voxelnext">4. VoxelNeXt</h2>
+<p><strong>Paper</strong>: <a href="https://arxiv.org/abs/2211.12697">VoxelNeXt: Fully Sparse VoxelNet for 3D Object Detection and Tracking</a><br>
+<strong>Repository</strong>: https://github.com/dvlab-research/VoxelNeXt</p>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<p>VoxelNeXt adapts ConvNeXt design principles to 3D voxel processing with depthwise convolutions and MLP blocks.</p>
+<h3 id="network-configuration">Network Configuration</h3>
+<h4 id="patchify-operation">Patchify Operation</h4>
+<ul>
+<li><strong>Input</strong>: 4 channels → 48 channels</li>
+<li><strong>Kernel size</strong>: 4×4×4</li>
+<li><strong>Operation</strong>: ConvNeXt-style patchify</li>
+</ul>
+<h4 id="convnext-style-stages">ConvNeXt-Style Stages</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Blocks</th>
+<th>Kernel Size</th>
+<th>Downsampling</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>48</td>
+<td>96</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>8× (aggressive)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>96</td>
+<td>192</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>8× (aggressive)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>192</td>
+<td>384</td>
+<td>6</td>
+<td>3×3×3</td>
+<td>8× (main stage)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>384</td>
+<td>768</td>
+<td>2</td>
+<td>3×3×3</td>
+<td>8× (aggressive)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="convnext-block-structure">ConvNeXt Block Structure</h4>
+<p>Each block contains:</p>
+<ol>
+<li><strong>Depthwise Convolution</strong>: Channel-wise 3×3×3 convolution</li>
+<li><strong>MLP Expansion</strong>: 1×1×1 conv with 4× channel expansion</li>
+<li><strong>MLP Contraction</strong>: 1×1×1 conv back to original channels</li>
+</ol>
+<pre class="hljs"><code><div>Block: DW Conv (3×3×3) → MLP (4× expansion) → MLP (contraction)
+</div></code></pre>
+<h4 id="classification-head">Classification Head</h4>
+<ul>
+<li><strong>Input</strong>: 768 channels → 20 classes</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Global average pooling + classification</li>
+</ul>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>ConvNeXt-inspired design for 3D processing</li>
+<li>Aggressive 8× downsampling per stage</li>
+<li>Depthwise separable convolutions for efficiency</li>
+<li>4× MLP expansion ratio (similar to ConvNeXt)</li>
+<li>Largest channel dimension: 768</li>
+</ul>
+<hr>
+<h2 id="5-rsn-range-sparse-net">5. RSN (Range Sparse Net)</h2>
+<p><strong>Paper</strong>: Range Sparse Net for LiDAR 3D Object Detection<br>
+<strong>Repository</strong>: https://github.com/caiyuanhao1998/RSN</p>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<p>RSN is specifically designed for LiDAR processing with range-aware features and efficient skip connections.</p>
+<h3 id="network-configuration">Network Configuration</h3>
+<h4 id="initial-feature-extraction">Initial Feature Extraction</h4>
+<ul>
+<li><strong>Input</strong>: 4 channels → 32 channels</li>
+<li><strong>Kernel size</strong>: 3×3×3</li>
+<li><strong>Operation</strong>: LiDAR-optimized sparse convolution</li>
+</ul>
+<h4 id="range-aware-encoder">Range-Aware Encoder</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Stride</th>
+<th>Features</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>32</td>
+<td>64</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Main + residual paths</td>
+</tr>
+<tr>
+<td>2</td>
+<td>64</td>
+<td>128</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Main + residual paths</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>256</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Main + residual paths</td>
+</tr>
+<tr>
+<td>4</td>
+<td>256</td>
+<td>512</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>Main + residual paths</td>
+</tr>
+</tbody>
+</table>
+<h4 id="range-aware-decoder-with-skip-connections">Range-Aware Decoder with Skip Connections</h4>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Input Channels</th>
+<th>Output Channels</th>
+<th>Kernel Size</th>
+<th>Stride</th>
+<th>Skip Connection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>512</td>
+<td>256</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>From encoder stage 4</td>
+</tr>
+<tr>
+<td>2</td>
+<td>256</td>
+<td>128</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>From encoder stage 3</td>
+</tr>
+<tr>
+<td>3</td>
+<td>128</td>
+<td>64</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>From encoder stage 2</td>
+</tr>
+<tr>
+<td>4</td>
+<td>64</td>
+<td>32</td>
+<td>3×3×3</td>
+<td>2</td>
+<td>From encoder stage 1</td>
+</tr>
+</tbody>
+</table>
+<h4 id="range-aware-feature-fusion">Range-Aware Feature Fusion</h4>
+<ul>
+<li><strong>Input</strong>: 32 channels → 64 channels</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Multi-scale feature fusion</li>
+</ul>
+<h4 id="final-classification">Final Classification</h4>
+<ul>
+<li><strong>Input</strong>: 64 channels → 20 classes</li>
+<li><strong>Kernel size</strong>: 1×1×1</li>
+<li><strong>Operation</strong>: Point-wise classification</li>
+</ul>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>Range-aware processing for LiDAR data</li>
+<li>Dual-path architecture (main + residual)</li>
+<li>Symmetric encoder-decoder with skip connections</li>
+<li>Multi-scale feature fusion</li>
+<li>LiDAR-specific optimizations</li>
+</ul>
+<hr>
+<h2 id="performance-characteristics">Performance Characteristics</h2>
+<h3 id="mac-operations-comparison">MAC Operations Comparison</h3>
+<p>The networks show different computational profiles:</p>
+<ol>
+<li><strong>Most Efficient</strong>: SPVNAS (NAS-optimized channels)</li>
+<li><strong>Balanced</strong>: MinkowskiNet (symmetric design)</li>
+<li><strong>Large Receptive Field</strong>: LargeKernel3D (large kernels)</li>
+<li><strong>Feature Rich</strong>: VoxelNeXt (deep stages)</li>
+<li><strong>Range Optimized</strong>: RSN (LiDAR-specific)</li>
+</ol>
+<h3 id="memory-vs-compute-bound-analysis">Memory vs Compute Bound Analysis</h3>
+<ul>
+<li><strong>Early layers</strong>: Memory-bound (gather dominates)</li>
+<li><strong>Deep layers</strong>: Compute-bound (GEMM dominates)</li>
+<li><strong>Large kernels</strong>: Higher compute intensity</li>
+<li><strong>Skip connections</strong>: Additional memory traffic</li>
+</ul>
+<h3 id="sparsity-utilization">Sparsity Utilization</h3>
+<p>All networks benefit significantly from:</p>
+<ul>
+<li><strong>Spatial sparsity</strong>: 3-7% occupancy reduces computation by ~20×</li>
+<li><strong>Feature sparsity</strong>: ReLU zeros provide additional 2× reduction</li>
+<li><strong>Weight sparsity</strong>: Pruning enables 1.5-3× further reduction</li>
+<li><strong>Combined effect</strong>: Up to 100× total speedup possible</li>
+</ul>
+<hr>
+<h2 id="implementation-notes">Implementation Notes</h2>
+<h3 id="sparse-convolution-types">Sparse Convolution Types</h3>
+<ol>
+<li><strong>Standard Sparse Conv</strong>: Allows sparsity pattern changes</li>
+<li><strong>Submanifold Conv</strong>: Maintains input sparsity pattern</li>
+<li><strong>Strided Conv</strong>: Downsampling with sparsity handling</li>
+<li><strong>Transposed Conv</strong>: Upsampling with sparsity restoration</li>
+</ol>
+<h3 id="memory-optimization">Memory Optimization</h3>
+<ul>
+<li><strong>Gather operations</strong>: Collect sparse features</li>
+<li><strong>Hash tables</strong>: Fast neighbor lookup</li>
+<li><strong>Memory pooling</strong>: Efficient allocation</li>
+<li><strong>Gradient checkpointing</strong>: Reduced memory during training</li>
+</ul>
+<h3 id="hardware-considerations">Hardware Considerations</h3>
+<ul>
+<li><strong>GPU utilization</strong>: Irregular memory access patterns</li>
+<li><strong>Memory bandwidth</strong>: Gather-scatter operations</li>
+<li><strong>Cache efficiency</strong>: Spatial locality in 3D data</li>
+<li><strong>Parallelization</strong>: Thread divergence in sparse operations</li>
+</ul>
+
+</body>
+</html>

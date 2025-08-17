@@ -3,6 +3,8 @@ import os
 
 # ── Default Configuration Values ──
 mem_trace = []
+ENABLE_MEM_TRACE = True  # Flag to enable/disable memory tracing
+mem_access_counter = 0   # Global counter for memory accesses
 debug = False
 output_dir = 'out/'
 
@@ -48,6 +50,10 @@ def get_config(_config_path):
     global NUM_TILES_GATHER, TILE_FEATS_GATHER, BULK_FEATS_GATHER, N_THREADS_GATHER, TOTAL_FEATS_PT_GATHER
     global NUM_PIVOTS, TOTAL_FEATS_PT
     global NUM_TILES, TILE_FEATS, BULK_FEATS, N_THREADS, mem_trace
+    global ENABLE_MEM_TRACE, mem_access_counter  # Add the new variables
+    
+    # Reset counter when loading new config
+    mem_access_counter = 0
     
     try:
         with open(_config_path, 'r') as f:
@@ -110,6 +116,9 @@ def get_config(_config_path):
     # TOTAL_FEATS_PT can be loaded or calculated using updated gather values
     TOTAL_FEATS_PT_GATHER = _config_data.get("TOTAL_FEATS_PT", NUM_TILES_GATHER * TILE_FEATS_GATHER)
     NUM_PIVOTS = _config_data.get("NUM_PIVOTS", NUM_PIVOTS)
+    
+    # Memory tracing configuration
+    ENABLE_MEM_TRACE = _config_data.get("ENABLE_MEM_TRACE", ENABLE_MEM_TRACE)
 
     
     # For compatibility with scripts that might expect these specific names from the old minuet_config.py
@@ -177,4 +186,22 @@ def print_current_config():
 # Ensure all imported names are clear
 # Example: if minuet_trace.py uses "from minuet_config import *", it gets all these globals.
 # The general NUM_THREADS (e.g., for C++ phases) is distinct from N_THREADS (for Python gather simulation).
+
+# Memory tracing utility functions
+def increment_mem_access_counter():
+    """Increment the global memory access counter."""
+    global mem_access_counter
+    mem_access_counter += 1
+
+def set_mem_trace_enabled(enabled):
+    """Set the memory tracing enabled flag."""
+    global ENABLE_MEM_TRACE
+    ENABLE_MEM_TRACE = enabled
+
+def print_mem_access_stats():
+    """Print memory access statistics."""
+    print(f"\n=== Memory Access Statistics ===")
+    print(f"Total memory accesses: {mem_access_counter}")
+    print(f"Memory tracing enabled: {ENABLE_MEM_TRACE}")
+    print("=================================\n")
 

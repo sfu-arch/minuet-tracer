@@ -7,6 +7,7 @@ from typing import List, Tuple, Dict, Set
 from coord import pack32, unpack32, unpack32s, Coord3D
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import minuet_config
 from minuet_config import *
 from minuet_utils import file_checksum
 from sorted_dict import SortedByValueLengthDict
@@ -112,9 +113,14 @@ def write_gmem_trace(filename, sizeof_addr = 4):
 
 def record_access(thread_id, op, addr):
     """Record a memory access: virtual thread ID, operation (R/W), tensor, and address."""
-    tensor = addr_to_tensor(addr)
-    entry = (curr_phase, thread_id, op, tensor, addr)
-    mem_trace.append(entry)
+    # Always increment the global memory access counter (this is single-threaded for now)
+    minuet_config.increment_mem_access_counter()
+    
+    # Only record trace if tracing is enabled
+    if minuet_config.ENABLE_MEM_TRACE:
+        tensor = addr_to_tensor(addr)
+        entry = (curr_phase, thread_id, op, tensor, addr)
+        mem_trace.append(entry)
 
 
 
@@ -266,12 +272,19 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
     
     def record_local(thread_id, op, addr):
         """Record a memory access in thread-local storage"""
-        if not hasattr(t_local, 'local_trace'):
-            t_local.local_trace = []
-            
-        tensor = addr_to_tensor(addr)
-        entry = (curr_phase, thread_id, op, tensor, addr)
-        t_local.local_trace.append(entry)
+        # Increment thread-local counter
+        if not hasattr(t_local, 'local_counter'):
+            t_local.local_counter = 0
+        t_local.local_counter += 1
+        
+        # Only record trace if tracing is enabled
+        if minuet_config.ENABLE_MEM_TRACE:
+            if not hasattr(t_local, 'local_trace'):
+                t_local.local_trace = []
+                
+            tensor = addr_to_tensor(addr)
+            entry = (curr_phase, thread_id, op, tensor, addr)
+            t_local.local_trace.append(entry)
     
     # Worker function for parallel execution of a portion of a batch
     def process_batch_portion(batch_start, thread_id, thread_start, thread_end):
@@ -327,7 +340,12 @@ def lookup(uniq_coords: List[IndexedCoord], qry_keys: List[IndexedCoord], qry_in
         
         # Transfer thread-local trace to global trace
         with kmap_lock:
-            if hasattr(t_local, 'local_trace') and t_local.local_trace:
+            # Add thread-local counter to global counter
+            if hasattr(t_local, 'local_counter'):
+                minuet_config.mem_access_counter += t_local.local_counter
+                t_local.local_counter = 0
+            
+            if minuet_config.ENABLE_MEM_TRACE and hasattr(t_local, 'local_trace') and t_local.local_trace:
                 mem_trace.extend(t_local.local_trace)
                 t_local.local_trace = []
     
