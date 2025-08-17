@@ -205,6 +205,7 @@ if __name__ == '__main__':
     
     # Prepare stats dictionary
     stats = {
+        "num_points": len(uniq_coords),
         "kmap": {
             "num_keys": kmap_num_keys,
             "avg_length": kmap_avg_length
